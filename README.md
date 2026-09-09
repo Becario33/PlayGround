@@ -1,11 +1,11 @@
 # PlayGround
 
-Patio de experimentos. Cada prueba vive en **su carpeta**. No es HADES ni HORUS.
+Patio de experimentos. Cada prueba vive en **su carpeta**.
 
 ## Requisitos
 
 - Python 3.9+
-- Windows (laptop becario) o Mac (desarrollo)
+- Windows (laptop becario)
 
 ```bat
 git clone https://github.com/Becario33/PlayGround.git
