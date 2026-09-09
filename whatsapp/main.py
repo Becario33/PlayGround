@@ -409,17 +409,16 @@ def _boton_enviar(page):
     return page.locator("button[aria-label='Send']")
 
 
-def _boton_enviar_media(page):
-    loc = page.locator('div[role="button"][aria-label="Send 1 selected"]')
-    if loc.count() == 0:
-        loc = page.locator('div[role="button"]').filter(
-            has=page.locator('[data-icon="wds-ic-send-filled"]')
-        )
-    if loc.count() == 0:
-        loc = page.locator('div[role="button"][aria-label^="Send"]')
-    if loc.count() == 0:
-        loc = page.locator('div[role="button"][aria-label^="Enviar"]')
-    return loc.last
+def _js_clic_enviar_media(page):
+    return page.evaluate(
+        """() => {
+            const el = document.querySelector('div[role="button"][aria-label="Send 1 selected"]')
+                || document.querySelector('[data-icon="wds-ic-send-filled"]')?.closest('[role="button"]');
+            if (!el) return false;
+            el.click();
+            return true;
+        }"""
+    )
 
 
 def enviar_imagen(page, ruta, pie=""):
@@ -445,26 +444,25 @@ def enviar_imagen(page, ruta, pie=""):
         print("No encontré el adjuntar de WhatsApp.")
         return False
     inp.first.set_input_files(os.path.abspath(ruta))
-    btn = _boton_enviar_media(page)
+    media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
-        btn.wait_for(state="visible", timeout=25000)
+        media.wait_for(state="visible", timeout=25000)
     except Exception:
-        print("No apareció el botón verde (Send 1 selected).")
+        print("No apareció Send 1 selected.")
         return False
-    if pie:
-        for nombre in ("Add a caption", "Añade un comentario", "Add caption"):
-            cap = page.get_by_role("textbox", name=nombre)
-            if cap.count():
-                cap.last.click()
-                page.wait_for_timeout(200)
-                page.keyboard.insert_text(pie)
-                break
+    page.wait_for_timeout(400)
     try:
-        _boton_enviar_media(page).click(timeout=15000)
+        media.click(timeout=8000, force=True)
     except Exception:
-        print("No pude pulsar Send 1 selected.")
-        return False
-    page.wait_for_timeout(2500)
+        if not _js_clic_enviar_media(page):
+            print("No pude pulsar Send 1 selected.")
+            return False
+    page.wait_for_timeout(1500)
+    if page.locator('div[role="button"][aria-label="Send 1 selected"]').count():
+        if not _js_clic_enviar_media(page):
+            print("El preview sigue abierto; no envió.")
+            return False
+        page.wait_for_timeout(1500)
     print("Imagen enviada.")
     return True
 
@@ -495,7 +493,11 @@ def enviar_grupo(page, nombre, texto, imagen=None):
     if not abrir_grupo(page, nombre):
         return False
     if imagen:
-        return enviar_imagen(page, imagen, pie=texto)
+        if not enviar_imagen(page, imagen):
+            return False
+        if texto:
+            return escribir_y_enviar(page, texto)
+        return True
     return escribir_y_enviar(page, texto)
 
 

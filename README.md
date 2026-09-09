@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.3.3** — Clic JS en Send 1 selected
 - **v1.3.2** — Enviar imagen: botón Send 1 selected
 - **v1.3.1** — Imagen nítida + botón enviar del preview
 - **v1.3.0** — Captura Excel de la consulta al grupo
