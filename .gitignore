@@ -1,0 +1,6 @@
+chrome_whatsapp_perfil/
+__pycache__/
+.venv/
+.env
+.cursor/
+.DS_Store
