@@ -402,12 +402,24 @@ def _boton_enviar(page):
         'button[aria-label="Send"]',
         'button[aria-label="Enviar"]',
         'span[data-icon="send"]',
-        '[data-icon="wds-ic-send-filled"]',
     ):
         loc = page.locator(sel)
         if loc.count():
             return loc.last
     return page.locator("button[aria-label='Send']")
+
+
+def _boton_enviar_media(page):
+    loc = page.locator('div[role="button"][aria-label="Send 1 selected"]')
+    if loc.count() == 0:
+        loc = page.locator('div[role="button"]').filter(
+            has=page.locator('[data-icon="wds-ic-send-filled"]')
+        )
+    if loc.count() == 0:
+        loc = page.locator('div[role="button"][aria-label^="Send"]')
+    if loc.count() == 0:
+        loc = page.locator('div[role="button"][aria-label^="Enviar"]')
+    return loc.last
 
 
 def enviar_imagen(page, ruta, pie=""):
@@ -433,18 +445,12 @@ def enviar_imagen(page, ruta, pie=""):
         print("No encontré el adjuntar de WhatsApp.")
         return False
     inp.first.set_input_files(os.path.abspath(ruta))
+    btn = _boton_enviar_media(page)
     try:
-        page.locator('div[role="button"][aria-label="Send"]').last.wait_for(
-            state="visible", timeout=20000
-        )
+        btn.wait_for(state="visible", timeout=25000)
     except Exception:
-        try:
-            page.locator('div[role="button"][aria-label="Enviar"]').last.wait_for(
-                state="visible", timeout=8000
-            )
-        except Exception:
-            print("No apareció el botón verde de enviar la imagen.")
-            return False
+        print("No apareció el botón verde (Send 1 selected).")
+        return False
     if pie:
         for nombre in ("Add a caption", "Añade un comentario", "Add caption"):
             cap = page.get_by_role("textbox", name=nombre)
@@ -453,11 +459,10 @@ def enviar_imagen(page, ruta, pie=""):
                 page.wait_for_timeout(200)
                 page.keyboard.insert_text(pie)
                 break
-    btn = _boton_enviar(page)
     try:
-        btn.click(timeout=15000)
+        _boton_enviar_media(page).click(timeout=15000)
     except Exception:
-        print("No pude pulsar Enviar en la vista previa.")
+        print("No pude pulsar Send 1 selected.")
         return False
     page.wait_for_timeout(2500)
     print("Imagen enviada.")
