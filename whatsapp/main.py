@@ -162,7 +162,7 @@ def armar_excel(cols, filas):
     return ruta
 
 
-def _captura_pillow(xlsx_path, png_path):
+def _captura_pillow(xlsx_path, jpg_path):
     from openpyxl import load_workbook
     from PIL import Image, ImageDraw, ImageFont
 
@@ -183,8 +183,8 @@ def _captura_pillow(xlsx_path, png_path):
     anchos = [280, 300]
     w = (sum(anchos) + pad * 2) * escala
     h = (alto * max(len(filas), 1) + pad * 2) * escala
-    img = Image.new("RGB", (w, h), "white")
-    draw = ImageDraw.Draw(img)
+    tabla = Image.new("RGB", (w, h), "white")
+    draw = ImageDraw.Draw(tabla)
     try:
         font = ImageFont.truetype("arial.ttf", 16 * escala)
         font_t = ImageFont.truetype("arialbd.ttf", 18 * escala)
@@ -212,16 +212,20 @@ def _captura_pillow(xlsx_path, png_path):
                     draw.text((x + 10 * escala, y + 8 * escala), txt, fill="#222222", font=font)
                 x += aw[j]
         y += ah
-    img.save(png_path)
-    return png_path
+    # JPEG grande: WhatsApp manda PNG chico como sticker
+    lienzo_w, lienzo_h = max(w + 120, 1280), max(h + 120, 720)
+    lienzo = Image.new("RGB", (lienzo_w, lienzo_h), "white")
+    lienzo.paste(tabla, ((lienzo_w - w) // 2, (lienzo_h - h) // 2))
+    lienzo.save(jpg_path, format="JPEG", quality=92)
+    return jpg_path
 
 
 def captura_excel(xlsx_path):
-    png_path = os.path.splitext(xlsx_path)[0] + ".png"
-    _captura_pillow(xlsx_path, png_path)
-    print("Imagen de la tabla:")
-    print(" ", png_path)
-    return png_path
+    jpg_path = os.path.splitext(xlsx_path)[0] + ".jpg"
+    _captura_pillow(xlsx_path, jpg_path)
+    print("Imagen (JPEG, no sticker):")
+    print(" ", jpg_path)
+    return jpg_path
 
 
 def _perfil_en_uso(perfil):
@@ -423,9 +427,9 @@ def _js_clic_enviar_media(page):
 
 def enviar_imagen(page, ruta, pie=""):
     if not os.path.isfile(ruta):
-        print("No está el PNG de la captura.")
+        print("No está el JPEG de la captura.")
         return False
-    inp = page.locator('input[type="file"][accept*="image"]')
+    inp = page.locator('input[type="file"][accept*="video"]')
     if inp.count() == 0:
         for sel in (
             'button[aria-label="Attach"]',
@@ -437,13 +441,21 @@ def enviar_imagen(page, ruta, pie=""):
             loc = page.locator(sel)
             if loc.count():
                 loc.first.click()
-                page.wait_for_timeout(600)
+                page.wait_for_timeout(500)
                 break
-        inp = page.locator('input[type="file"]')
+        for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
+            op = page.get_by_text(nombre, exact=False)
+            if op.count():
+                op.first.click()
+                page.wait_for_timeout(400)
+                break
+        inp = page.locator('input[type="file"][accept*="video"]')
     if inp.count() == 0:
-        print("No encontré el adjuntar de WhatsApp.")
+        inp = page.locator('input[type="file"][accept*="image"]')
+    if inp.count() == 0:
+        print("No encontré Fotos y videos de WhatsApp.")
         return False
-    inp.first.set_input_files(os.path.abspath(ruta))
+    inp.last.set_input_files(os.path.abspath(ruta))
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
         media.wait_for(state="visible", timeout=25000)
@@ -493,11 +505,7 @@ def enviar_grupo(page, nombre, texto, imagen=None):
     if not abrir_grupo(page, nombre):
         return False
     if imagen:
-        if not enviar_imagen(page, imagen):
-            return False
-        if texto:
-            return escribir_y_enviar(page, texto)
-        return True
+        return enviar_imagen(page, imagen)
     return escribir_y_enviar(page, texto)
 
 

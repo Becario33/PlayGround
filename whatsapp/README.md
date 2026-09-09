@@ -76,6 +76,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.3.4** — Foto JPEG (no sticker) y sin texto extra
 - **v1.3.3** — Enviar imagen: clic JS en Send 1 selected
 - **v1.3.2** — Clic en Send 1 selected (preview)
 - **v1.3.1** — Imagen nítida y clic en el avión verde
