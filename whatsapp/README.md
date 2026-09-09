@@ -76,6 +76,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.3.8** — Alto de filas al texto (sin lienzo blanco)
 - **v1.3.7** — Fix recorte (import Image)
 - **v1.3.6** — Recorte dinámico al tamaño de la tabla
 - **v1.3.5** — Solo la tabla, sin marco blanco

@@ -163,21 +163,32 @@ def armar_excel(cols, filas):
     return ruta
 
 
-def _recortar_al_contenido(img):
-    from PIL import Image, ImageChops
+def _fuente_tabla(escala):
+    from PIL import ImageFont
 
-    fondo = Image.new("RGB", img.size, (255, 255, 255))
-    diff = ImageChops.difference(img, fondo)
-    mask = diff.convert("L").point(lambda p: 255 if p > 12 else 0)
-    caja = mask.getbbox()
-    if not caja:
-        return img
-    return img.crop(caja)
+    candidatos = (
+        ("arial.ttf", "arialbd.ttf"),
+        ("Arial.ttf", "Arial Bold.ttf"),
+        ("/Windows/Fonts/arial.ttf", "/Windows/Fonts/arialbd.ttf"),
+        ("/System/Library/Fonts/Supplemental/Arial.ttf",
+         "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+    )
+    for regular, bold in candidatos:
+        try:
+            return (
+                ImageFont.truetype(regular, 16 * escala),
+                ImageFont.truetype(bold, 18 * escala),
+                ImageFont.truetype(bold, 16 * escala),
+            )
+        except Exception:
+            continue
+    font = ImageFont.load_default()
+    return font, font, font
 
 
 def _captura_pillow(xlsx_path, jpg_path):
     from openpyxl import load_workbook
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
     wb = load_workbook(xlsx_path)
     ws = wb.active
@@ -192,64 +203,98 @@ def _captura_pillow(xlsx_path, jpg_path):
                 celdas.append(f"{int(v):,}")
             else:
                 celdas.append(str(v))
-        filas.append(celdas)
-    escala, alto = 3, 40
-    try:
-        font = ImageFont.truetype("arial.ttf", 16 * escala)
-        font_t = ImageFont.truetype("arialbd.ttf", 18 * escala)
-        font_b = ImageFont.truetype("arialbd.ttf", 16 * escala)
-    except Exception:
-        font = ImageFont.load_default()
-        font_t = font
-        font_b = font
+        if any(c.strip() for c in celdas):
+            filas.append(celdas)
+    if not filas:
+        filas = [["(sin filas)"]]
+
+    escala = 3
+    pad_x, pad_y = 10 * escala, 3 * escala
+    font, font_t, font_b = _fuente_tabla(escala)
     medidor = ImageDraw.Draw(Image.new("RGB", (8, 8)))
 
-    def _ancho_txt(txt, fnt):
-        b = medidor.textbbox((0, 0), txt or " ", font=fnt)
-        return b[2] - b[0]
+    def _font_fila(i):
+        if i == 0:
+            return font_t
+        if i == 1:
+            return font_b
+        return font
+
+    def _recorte_texto(txt, fnt, fill, bg):
+        from PIL import ImageChops
+
+        txt = txt or " "
+        b = medidor.textbbox((0, 0), txt, font=fnt)
+        w = max(int(b[2] - b[0]) + 80, 80)
+        h = max(int(b[3] - b[1]) + 80, 80)
+        im = Image.new("RGB", (w, h), bg)
+        ImageDraw.Draw(im).text((40, 40), txt, font=fnt, fill=fill)
+        diff = ImageChops.difference(im, Image.new("RGB", im.size, bg))
+        mask = diff.convert("L").point(lambda p: 255 if p > 18 else 0)
+        box = mask.getbbox()
+        if not box:
+            return Image.new("RGB", (1, 1), bg)
+        return im.crop(box)
 
     ncols = max((len(f) for f in filas), default=1)
-    pad_cel = 22 * escala
+    recortes = []
+    for i, fila in enumerate(filas):
+        fnt = _font_fila(i)
+        if i == 0:
+            recortes.append([_recorte_texto(fila[0], fnt, "#217346", "white")])
+        elif i == 1:
+            recortes.append([
+                _recorte_texto(fila[j] if j < len(fila) else "", fnt, "white", "#217346")
+                for j in range(ncols)
+            ])
+        else:
+            recortes.append([
+                _recorte_texto(fila[j] if j < len(fila) else "", fnt, "#222222", "white")
+                for j in range(ncols)
+            ])
+
     anchos = []
     for c in range(ncols):
-        mx = 40 * escala
-        for i, fila in enumerate(filas):
-            if c >= len(fila):
+        mx = 1
+        for i, fila_r in enumerate(recortes):
+            if i == 0 or c >= len(fila_r):
                 continue
-            fnt = font_t if i == 0 else (font_b if i == 1 else font)
-            if i == 0:
-                continue
-            mx = max(mx, _ancho_txt(fila[c], fnt) + pad_cel)
+            mx = max(mx, fila_r[c].size[0] + pad_x * 2)
         anchos.append(mx)
-    if filas:
-        titulo_w = _ancho_txt(filas[0][0] if filas[0] else "", font_t) + pad_cel
-        if titulo_w > sum(anchos):
-            extra = titulo_w - sum(anchos)
-            anchos[-1] += extra
-    ah = alto * escala
-    w, h = sum(anchos), ah * max(len(filas), 1)
-    tabla = Image.new("RGB", (w + 2, h + 2), "white")
-    draw = ImageDraw.Draw(tabla)
-    y = 1
-    for i, fila in enumerate(filas):
-        x = 1
+    titulo_w = recortes[0][0].size[0] + pad_x * 2
+    if titulo_w > sum(anchos):
+        anchos[-1] += titulo_w - sum(anchos)
+
+    altos = [max(im.size[1] for im in fila_r) + pad_y * 2 for fila_r in recortes]
+    w, h = sum(anchos), sum(altos)
+    tabla = Image.new("RGB", (w, h), "white")
+    y = 0
+    for i, fila_r in enumerate(recortes):
+        ah = altos[i]
+        x = 0
         if i == 0:
-            box = [x, y, x + sum(anchos), y + ah]
-            draw.rectangle(box, fill="white", outline="#D0D0D0")
-            draw.text((x + 10 * escala, y + 8 * escala), fila[0], fill="#217346", font=font_t)
+            tabla.paste(fila_r[0], (pad_x, y + (ah - fila_r[0].size[1]) // 2))
+        elif i == 1:
+            tabla.paste(Image.new("RGB", (w, ah), "#217346"), (0, y))
+            for j, im in enumerate(fila_r):
+                tabla.paste(im, (x + pad_x, y + (ah - im.size[1]) // 2))
+                x += anchos[j]
         else:
-            for j in range(ncols):
-                txt = fila[j] if j < len(fila) else ""
-                box = [x, y, x + anchos[j], y + ah]
-                if i == 1:
-                    draw.rectangle(box, fill="#217346", outline="#1A5C38")
-                    draw.text((x + 10 * escala, y + 8 * escala), txt, fill="white", font=font_b)
-                else:
-                    draw.rectangle(box, fill="white", outline="#C8C8C8")
-                    draw.text((x + 10 * escala, y + 8 * escala), txt, fill="#222222", font=font)
+            for j, im in enumerate(fila_r):
+                tabla.paste(im, (x + pad_x, y + (ah - im.size[1]) // 2))
                 x += anchos[j]
         y += ah
-    tabla = _recortar_al_contenido(tabla)
+
+    draw = ImageDraw.Draw(tabla)
+    draw.rectangle([0, 0, w - 1, h - 1], outline="#C8C8C8")
+    y = 0
+    for ah in altos[:-1]:
+        y += ah
+        draw.line([(0, y), (w - 1, y)], fill="#C8C8C8")
+    x = 0
+    for c in range(ncols - 1):
+        x += anchos[c]
+        draw.line([(x, altos[0]), (x, h - 1)], fill="#C8C8C8")
     tabla.save(jpg_path, format="JPEG", quality=95)
     return jpg_path
 
