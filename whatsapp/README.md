@@ -79,6 +79,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.1** — Adjunto sin Explorador (input oculto / file chooser)
 - **v1.4.0** — Captura literal Excel COM (fallback Pillow / `--pillow`)
 - **v1.3.8** — Alto de filas al texto (sin lienzo blanco)
 - **v1.3.7** — Fix recorte (import Image)

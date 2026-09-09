@@ -616,8 +616,25 @@ def enviar_imagen(page, ruta, pie=""):
     if not os.path.isfile(ruta):
         print("No está el JPEG de la captura.")
         return False
-    inp = page.locator('input[type="file"][accept*="video"]')
-    if inp.count() == 0:
+    ruta_abs = os.path.abspath(ruta)
+
+    def _set_en_input():
+        # Fotos y videos (accept con video). Evita el input de stickers.
+        for sel in (
+            'input[type="file"][accept*="video"]',
+            'input[type="file"][accept*="image"]',
+        ):
+            loc = page.locator(sel)
+            if not loc.count():
+                continue
+            try:
+                loc.last.set_input_files(ruta_abs)
+                return True
+            except Exception:
+                continue
+        return False
+
+    if not _set_en_input():
         for sel in (
             'button[aria-label="Attach"]',
             'button[aria-label="Adjuntar"]',
@@ -627,22 +644,37 @@ def enviar_imagen(page, ruta, pie=""):
         ):
             loc = page.locator(sel)
             if loc.count():
-                loc.first.click()
+                try:
+                    loc.first.click(timeout=5000)
+                except Exception:
+                    continue
                 page.wait_for_timeout(500)
                 break
-        for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
-            op = page.get_by_text(nombre, exact=False)
-            if op.count():
-                op.first.click()
-                page.wait_for_timeout(400)
-                break
-        inp = page.locator('input[type="file"][accept*="video"]')
-    if inp.count() == 0:
-        inp = page.locator('input[type="file"][accept*="image"]')
-    if inp.count() == 0:
-        print("No encontré Fotos y videos de WhatsApp.")
-        return False
-    inp.last.set_input_files(os.path.abspath(ruta))
+        # Con el menú abierto: llenar el input oculto (sin abrir el Explorador)
+        if not _set_en_input():
+            adjunto = False
+            for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
+                op = page.get_by_text(nombre, exact=False)
+                if not op.count():
+                    continue
+                try:
+                    with page.expect_file_chooser(timeout=12000) as fc_info:
+                        op.first.click(timeout=5000, force=True)
+                    fc_info.value.set_files(ruta_abs)
+                    adjunto = True
+                    break
+                except Exception as e:
+                    print("No pude usar el diálogo de archivos.")
+                    print(" ", str(e).split("\n")[0])
+                    try:
+                        page.keyboard.press("Escape")
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(300)
+            if not adjunto and not _set_en_input():
+                print("No encontré cómo adjuntar Fotos y videos.")
+                return False
+
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
         media.wait_for(state="visible", timeout=25000)
@@ -793,10 +825,15 @@ def main():
             return 2
         ok = esperar_sesion(page)
         if ok and not args.solo_abrir:
-            if args.para:
-                ok = enviar(page, args.para, texto)
-            else:
-                ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
+            try:
+                if args.para:
+                    ok = enviar(page, args.para, texto)
+                else:
+                    ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
+            except Exception as e:
+                print("Falló el envío (Chrome sigue abierto).")
+                print(" ", str(e).split("\n")[0])
+                ok = False
         print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
         try:
             input()
