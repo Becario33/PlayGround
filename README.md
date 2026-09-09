@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.3.5** — Tabla sin marco blanco
 - **v1.3.4** — JPEG por Fotos y videos; solo la imagen
 - **v1.3.3** — Clic JS en Send 1 selected
 - **v1.3.2** — Enviar imagen: botón Send 1 selected

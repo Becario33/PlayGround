@@ -179,8 +179,8 @@ def _captura_pillow(xlsx_path, jpg_path):
             else:
                 celdas.append(str(v))
         filas.append(celdas)
-    escala, pad, alto = 2, 16, 36
-    anchos = [280, 300]
+    escala, pad, alto = 3, 12, 40
+    anchos = [300, 320]
     w = (sum(anchos) + pad * 2) * escala
     h = (alto * max(len(filas), 1) + pad * 2) * escala
     tabla = Image.new("RGB", (w, h), "white")
@@ -212,11 +212,7 @@ def _captura_pillow(xlsx_path, jpg_path):
                     draw.text((x + 10 * escala, y + 8 * escala), txt, fill="#222222", font=font)
                 x += aw[j]
         y += ah
-    # JPEG grande: WhatsApp manda PNG chico como sticker
-    lienzo_w, lienzo_h = max(w + 120, 1280), max(h + 120, 720)
-    lienzo = Image.new("RGB", (lienzo_w, lienzo_h), "white")
-    lienzo.paste(tabla, ((lienzo_w - w) // 2, (lienzo_h - h) // 2))
-    lienzo.save(jpg_path, format="JPEG", quality=92)
+    tabla.save(jpg_path, format="JPEG", quality=95)
     return jpg_path
 
 
