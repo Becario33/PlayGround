@@ -76,6 +76,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.3.6** — Recorte dinámico al tamaño de la tabla
 - **v1.3.5** — Solo la tabla, sin marco blanco
 - **v1.3.4** — Foto JPEG (no sticker) y sin texto extra
 - **v1.3.3** — Enviar imagen: clic JS en Send 1 selected
