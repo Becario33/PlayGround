@@ -164,7 +164,7 @@ def armar_excel(cols, filas):
 
 
 def _recortar_al_contenido(img):
-    from PIL import ImageChops
+    from PIL import Image, ImageChops
 
     fondo = Image.new("RGB", img.size, (255, 255, 255))
     diff = ImageChops.difference(img, fondo)

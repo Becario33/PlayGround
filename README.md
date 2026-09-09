@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.3.7** — Fix import Image en el recorte
 - **v1.3.6** — Recorte dinámico al contenido
 - **v1.3.5** — Tabla sin marco blanco
 - **v1.3.4** — JPEG por Fotos y videos; solo la imagen
