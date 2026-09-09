@@ -95,7 +95,7 @@ def consulta_asistencia():
         cur = conn.cursor()
         cur.execute(CONSULTA)
         cols = [d[0] for d in cur.description]
-        filas = cur.fetchall()
+        filas = [tuple(f) for f in cur.fetchall()]
     finally:
         conn.close()
     lineas = [" | ".join(cols)]
@@ -104,7 +104,149 @@ def consulta_asistencia():
     else:
         for fila in filas:
             lineas.append(" | ".join(_celda(v) for v in fila))
-    return "\n".join(lineas)
+    return "\n".join(lineas), cols, filas
+
+
+def _dir_resultados():
+    ruta = os.path.join(_dir_script(), "resultados")
+    os.makedirs(ruta, exist_ok=True)
+    return ruta
+
+
+def armar_excel(cols, filas):
+    from datetime import datetime
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Comscore"
+    ws["A1"] = "Asistencia industria Comscore (ayer)"
+    ws["A1"].font = Font(bold=True, size=14)
+    ws.merge_cells("A1:B1")
+    encabezado = PatternFill("solid", fgColor="217346")
+    fuente = Font(bold=True, color="FFFFFF")
+    borde = Border(
+        left=Side(style="thin", color="B0B0B0"),
+        right=Side(style="thin", color="B0B0B0"),
+        top=Side(style="thin", color="B0B0B0"),
+        bottom=Side(style="thin", color="B0B0B0"),
+    )
+    for i, col in enumerate(cols, 1):
+        cel = ws.cell(2, i, col)
+        cel.fill = encabezado
+        cel.font = fuente
+        cel.alignment = Alignment(horizontal="center")
+        cel.border = borde
+    if not filas:
+        ws.cell(3, 1, "(sin filas para ayer)").border = borde
+        ws.cell(3, 2, "").border = borde
+    else:
+        for r, fila in enumerate(filas, 3):
+            for c, valor in enumerate(fila, 1):
+                cel = ws.cell(r, c)
+                if hasattr(valor, "strftime"):
+                    cel.value = valor.strftime("%Y-%m-%d")
+                    cel.alignment = Alignment(horizontal="center")
+                else:
+                    cel.value = valor
+                    if isinstance(valor, (int, float)):
+                        cel.number_format = "#,##0"
+                        cel.alignment = Alignment(horizontal="right")
+                cel.border = borde
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 24
+    nombre = datetime.now().strftime("asistencia_%Y-%m-%d.xlsx")
+    ruta = os.path.join(_dir_resultados(), nombre)
+    wb.save(ruta)
+    return ruta
+
+
+def _captura_pillow(xlsx_path, png_path):
+    from openpyxl import load_workbook
+    from PIL import Image, ImageDraw, ImageFont
+
+    wb = load_workbook(xlsx_path)
+    ws = wb.active
+    filas = []
+    for row in ws.iter_rows(min_row=1, max_col=2, max_row=ws.max_row, values_only=True):
+        filas.append([("" if v is None else str(v)) for v in row])
+    pad, alto, anchos = 12, 28, [240, 260]
+    w = sum(anchos) + pad * 2
+    h = alto * max(len(filas), 1) + pad * 2
+    img = Image.new("RGB", (w, h), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 14)
+        font_b = ImageFont.truetype("arial.ttf", 14)
+    except Exception:
+        font = ImageFont.load_default()
+        font_b = font
+    y = pad
+    for i, fila in enumerate(filas):
+        x = pad
+        for j, txt in enumerate(fila):
+            box = [x, y, x + anchos[j], y + alto]
+            if i == 1:
+                draw.rectangle(box, fill="#217346", outline="#B0B0B0")
+                draw.text((x + 8, y + 6), txt, fill="white", font=font_b)
+            else:
+                draw.rectangle(box, fill="white", outline="#B0B0B0")
+                draw.text((x + 8, y + 6), txt, fill="#222222", font=font)
+            x += anchos[j]
+        y += alto
+    img.save(png_path)
+    return png_path
+
+
+def captura_excel(xlsx_path):
+    png_path = os.path.splitext(xlsx_path)[0] + ".png"
+    if sys.platform == "win32":
+        excel = None
+        wb = None
+        try:
+            import pythoncom
+            import win32com.client
+            from PIL import ImageGrab
+
+            pythoncom.CoInitialize()
+            excel = win32com.client.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            wb = excel.Workbooks.Open(os.path.abspath(xlsx_path))
+            ws = wb.Worksheets(1)
+            ws.UsedRange.CopyPicture(Appearance=1, Format=2)
+            time.sleep(0.5)
+            img = ImageGrab.grabclipboard()
+            if img is None:
+                raise RuntimeError("El portapapeles no trajo la captura de Excel.")
+            img.save(png_path)
+            print("Captura Excel (COM):")
+            print(" ", png_path)
+            return png_path
+        except Exception as e:
+            print("Excel COM no pudo capturar; uso tabla en imagen.")
+            print(" ", str(e).split("\n")[0])
+        finally:
+            try:
+                if wb is not None:
+                    wb.Close(SaveChanges=False)
+            except Exception:
+                pass
+            try:
+                if excel is not None:
+                    excel.Quit()
+            except Exception:
+                pass
+            try:
+                import pythoncom
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+    _captura_pillow(xlsx_path, png_path)
+    print("Captura (imagen de tabla):")
+    print(" ", png_path)
+    return png_path
 
 
 def _perfil_en_uso(perfil):
@@ -278,6 +420,58 @@ def abrir_grupo(page, nombre):
     return True
 
 
+def _boton_enviar(page):
+    enviar_btn = page.locator('button[aria-label="Send"]')
+    if enviar_btn.count() == 0:
+        enviar_btn = page.locator('button[aria-label="Enviar"]')
+    if enviar_btn.count() == 0:
+        enviar_btn = page.locator('span[data-icon="send"]')
+    return enviar_btn
+
+
+def enviar_imagen(page, ruta, pie=""):
+    if not os.path.isfile(ruta):
+        print("No está el PNG de la captura.")
+        return False
+    inp = page.locator('input[type="file"][accept*="image"]')
+    if inp.count() == 0:
+        for sel in (
+            'button[aria-label="Attach"]',
+            'button[aria-label="Adjuntar"]',
+            'span[data-icon="plus"]',
+            'span[data-icon="attach-menu-plus"]',
+            'div[title="Attach"]',
+        ):
+            loc = page.locator(sel)
+            if loc.count():
+                loc.first.click()
+                page.wait_for_timeout(600)
+                break
+        inp = page.locator('input[type="file"]')
+    if inp.count() == 0:
+        print("No encontré el adjuntar de WhatsApp.")
+        return False
+    inp.first.set_input_files(os.path.abspath(ruta))
+    page.wait_for_timeout(2500)
+    if pie:
+        caja = _caja_mensaje(page)
+        if caja is not None:
+            caja.click()
+            page.wait_for_timeout(200)
+            page.keyboard.insert_text(pie)
+    btn = _boton_enviar(page)
+    if btn.count():
+        try:
+            btn.first.click(timeout=15000)
+        except Exception:
+            page.keyboard.press("Enter")
+    else:
+        page.keyboard.press("Enter")
+    page.wait_for_timeout(2500)
+    print("Imagen enviada.")
+    return True
+
+
 def escribir_y_enviar(page, texto):
     caja = _caja_mensaje(page)
     if caja is None:
@@ -287,14 +481,10 @@ def escribir_y_enviar(page, texto):
     page.wait_for_timeout(300)
     page.keyboard.insert_text(texto)
     page.wait_for_timeout(300)
-    enviar_btn = page.locator('button[aria-label="Send"]')
-    if enviar_btn.count() == 0:
-        enviar_btn = page.locator('button[aria-label="Enviar"]')
-    if enviar_btn.count() == 0:
-        enviar_btn = page.locator('span[data-icon="send"]')
-    if enviar_btn.count():
+    btn = _boton_enviar(page)
+    if btn.count():
         try:
-            enviar_btn.first.click(timeout=8000)
+            btn.first.click(timeout=8000)
         except Exception:
             page.keyboard.press("Enter")
     else:
@@ -304,9 +494,11 @@ def escribir_y_enviar(page, texto):
     return True
 
 
-def enviar_grupo(page, nombre, texto):
+def enviar_grupo(page, nombre, texto, imagen=None):
     if not abrir_grupo(page, nombre):
         return False
+    if imagen:
+        return enviar_imagen(page, imagen, pie=texto)
     return escribir_y_enviar(page, texto)
 
 
@@ -353,13 +545,18 @@ def main():
 
     _cargar_env()
     texto = args.texto
+    imagen = None
     if args.prueba:
         texto = TEXTO_DEFAULT
     elif texto is None and not args.solo_abrir:
         try:
-            texto = consulta_asistencia()
+            texto, cols, filas = consulta_asistencia()
+            xlsx = armar_excel(cols, filas)
+            print("Excel:")
+            print(" ", xlsx)
+            imagen = captura_excel(xlsx)
         except Exception as e:
-            print("No salió la consulta.")
+            print("No salió la consulta o la captura.")
             print(" ", str(e))
             return 1
         print("Resultado SQL:")
@@ -400,7 +597,7 @@ def main():
             if args.para:
                 ok = enviar(page, args.para, texto)
             else:
-                ok = enviar_grupo(page, args.grupo, texto)
+                ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
         print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
         try:
             input()

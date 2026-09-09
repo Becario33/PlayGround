@@ -1,4 +1,5 @@
 **/chrome_whatsapp_perfil/
+**/resultados/
 __pycache__/
 .venv/
 .env
