@@ -1,4 +1,4 @@
-# PlayGround: WhatsApp Web con Chrome persistente.
+# PlayGround / whatsapp: WhatsApp Web con Chrome persistente.
 # Primera vez: escanea el QR. Siguientes: la misma carpeta chrome_whatsapp_perfil.
 #   python main.py
 # Grupo "Data Analytics" y texto de prueba. Número (lada país, sin +):
