@@ -1,14 +1,15 @@
 # PlayGround / whatsapp
 
-WhatsApp Web con un Chrome persistente: el QR se escanea **una vez** y la sesión queda en `chrome_whatsapp_perfil/` (junto a este `main.py`, no es tu Chrome de diario).
+Consulta de asistencia Comscore (ayer) en SQL Server y el resultado se manda al grupo **Data Analytics** por WhatsApp Web. Chrome persistente: QR **una vez** (carpeta `chrome_whatsapp_perfil/`, no tu Chrome de diario).
 
-En cada máquina nueva hay que escanear el QR **en esa PC**. Esa carpeta no se sube a GitHub.
+En cada PC nueva hay que escanear el QR. Esa carpeta y el `.env` no se suben a GitHub. La base `10.55.55.134` solo responde **en el corporativo**.
 
 ## Requisitos
 
 - Python 3.9+
-- Windows (laptop becario) o Mac (desarrollo)
+- Windows (laptop becario), red Cinemex
 - Chrome del sistema
+- ODBC Driver 17 (o 18) for SQL Server
 
 ```bat
 python -m pip install -r requirements.txt
@@ -17,13 +18,18 @@ python -m playwright install chromium
 
 ## Configuración
 
-1. Clona y entra a esta carpeta:
+1. Clona y entra:
    ```bat
    git clone https://github.com/Becario33/PlayGround.git
    cd PlayGround
    cd whatsapp
    ```
-2. No hay `.env`. Cierra el Chrome del experimento si quedó abierto.
+2. Credenciales SQL:
+   ```bat
+   copy .env.example .env
+   ```
+   Edita `.env`: `SQL_USER` y `SQL_PASSWORD` (no se sube).
+3. Cierra el Chrome del experimento si quedó abierto.
 
 ## Uso
 
@@ -31,17 +37,16 @@ python -m playwright install chromium
 python main.py
 ```
 
-1. Primera vez: escanea el QR de WhatsApp Web.
-2. Busca el grupo **Data Analytics** y manda el texto de persistencia.
-3. Enter en la consola **y cierra esa ventana de Chrome** antes de volver a correr.
-4. Segunda vez: misma carpeta, sin QR. Si dejas el Chrome anterior abierto, la nueva corrida se queda en `about:blank` y WhatsApp no carga.
+1. Corre la consulta (asistencia industria de ayer).
+2. Abre WhatsApp, grupo Data Analytics, manda el resultado tal cual.
+3. Enter y **cierra Chrome** antes de volver a correr.
 
 Opcional:
 
 ```bat
-python main.py --grupo "Data Analytics"
+python main.py --prueba
 python main.py --texto "otro mensaje"
-python main.py --para 5215512345678 --texto "hola"
+python main.py --grupo "Data Analytics"
 python main.py --solo-abrir
 ```
 
@@ -49,20 +54,24 @@ python main.py --solo-abrir
 
 | Parte | Cómo |
 |--------|------|
+| SQL | pyodbc a `Programacion.dbo.ComscoreMPAMexico` (ayer) |
 | Chrome | Playwright `launch_persistent_context` + Chrome del sistema |
-| Perfil | Carpeta `chrome_whatsapp_perfil/` junto a `main.py` |
-| WhatsApp | `web.whatsapp.com`: busca grupo y envía texto |
+| Perfil | `chrome_whatsapp_perfil/` junto a `main.py` |
+| WhatsApp | `web.whatsapp.com`: busca grupo y pega el texto de la consulta |
 
 ## Estructura
 
 ```
 main.py                    Arranque
-requirements.txt           Playwright
-chrome_whatsapp_perfil/    Sesión local (no se sube)
+requirements.txt           Playwright + pyodbc
+.env.example               Plantilla SQL (sin password)
+.env                       Local, no se sube
+chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 ```
 
 ## Versiones
 
+- **v1.2.0** — Resultado SQL al grupo Data Analytics
 - **v1.1.1** — Segunda corrida: cierra Chrome anterior; menos `--no-sandbox`
 - **v1.1.0** — Carpeta `whatsapp/` dentro de PlayGround
 - **v1.0.0** — WhatsApp Web con perfil persistente

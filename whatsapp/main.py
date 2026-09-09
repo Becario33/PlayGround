@@ -1,8 +1,6 @@
-# PlayGround / whatsapp: WhatsApp Web con Chrome persistente.
-# Primera vez: escanea el QR. Siguientes: la misma carpeta chrome_whatsapp_perfil.
+# PlayGround / whatsapp: consulta SQL → WhatsApp Web (grupo Data Analytics).
 #   python main.py
-# Grupo "Data Analytics" y texto de prueba. Número (lada país, sin +):
-#   python main.py --para 5215512345678
+# Primera vez: QR. Cierra Chrome antes de volver a correr.
 
 import argparse
 import os
@@ -13,6 +11,19 @@ URL_WA = "https://web.whatsapp.com/"
 PERFIL = "chrome_whatsapp_perfil"
 GRUPO_DEFAULT = "Data Analytics"
 TEXTO_DEFAULT = "Prueba de persistencia: la sesión sigue abierta; el QR solo se escanea una vez."
+CONSULTA = """
+SELECT
+    FechaComscore,
+    SUM(CAST(Asistencia AS bigint)) AS AsistenciaIndustria
+FROM [Programacion].[dbo].[ComscoreMPAMexico]
+WHERE FechaComscore = DATEADD(day, -1, CAST(GETDATE() AS date))
+GROUP BY FechaComscore
+""".strip()
+DRIVERS_ODBC = (
+    "ODBC Driver 17 for SQL Server",
+    "ODBC Driver 18 for SQL Server",
+    "SQL Server",
+)
 
 
 def _dir_script():
@@ -20,6 +31,80 @@ def _dir_script():
         return os.path.dirname(os.path.abspath(__file__))
     except NameError:
         return os.getcwd()
+
+
+def _cargar_env():
+    ruta = os.path.join(_dir_script(), ".env")
+    if not os.path.isfile(ruta):
+        return False
+    with open(ruta, encoding="utf-8") as f:
+        for linea in f:
+            linea = linea.strip()
+            if not linea or linea.startswith("#") or "=" not in linea:
+                continue
+            k, v = linea.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    return True
+
+
+def _conectar_sql():
+    try:
+        import pyodbc
+    except ImportError as e:
+        raise RuntimeError(
+            "Falta pyodbc. En whatsapp:\n"
+            "  python -m pip install -r requirements.txt"
+        ) from e
+    server = os.environ.get("SQL_SERVER", "").strip()
+    database = os.environ.get("SQL_DATABASE", "").strip()
+    user = os.environ.get("SQL_USER", "").strip()
+    password = os.environ.get("SQL_PASSWORD", "")
+    if not server or not database or not user:
+        raise RuntimeError(
+            "Falta .env (SQL_SERVER, SQL_DATABASE, SQL_USER, SQL_PASSWORD).\n"
+            "  copy .env.example .env"
+        )
+    ultimo = None
+    for driver in DRIVERS_ODBC:
+        extra = "TrustServerCertificate=yes;Encrypt=no;" if "18" in driver else ""
+        conn_str = (
+            f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};"
+            f"UID={user};PWD={password};{extra}"
+        )
+        try:
+            return pyodbc.connect(conn_str, timeout=30)
+        except Exception as e:
+            ultimo = e
+    raise RuntimeError(
+        "No conectó a SQL Server (¿estás en el corporativo?). "
+        + str(ultimo).split("\n")[0]
+    )
+
+
+def _celda(valor):
+    if valor is None:
+        return "NULL"
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m-%d")
+    return str(valor)
+
+
+def consulta_asistencia():
+    conn = _conectar_sql()
+    try:
+        cur = conn.cursor()
+        cur.execute(CONSULTA)
+        cols = [d[0] for d in cur.description]
+        filas = cur.fetchall()
+    finally:
+        conn.close()
+    lineas = [" | ".join(cols)]
+    if not filas:
+        lineas.append("(sin filas para ayer)")
+    else:
+        for fila in filas:
+            lineas.append(" | ".join(_celda(v) for v in fila))
+    return "\n".join(lineas)
 
 
 def _perfil_en_uso(perfil):
@@ -258,12 +343,28 @@ def main():
         except Exception:
             pass
 
-    ap = argparse.ArgumentParser(description="Experimento WhatsApp Web (perfil persistente).")
+    ap = argparse.ArgumentParser(description="Consulta SQL → WhatsApp (perfil persistente).")
     ap.add_argument("--grupo", default=GRUPO_DEFAULT, help="Nombre exacto del grupo")
     ap.add_argument("--para", default="", help="Número destino con lada país, sin + (opcional)")
-    ap.add_argument("--texto", default=TEXTO_DEFAULT)
+    ap.add_argument("--texto", default=None, help="Texto fijo; si omites, manda el resultado SQL")
+    ap.add_argument("--prueba", action="store_true", help="Manda el texto de persistencia, sin SQL")
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
     args = ap.parse_args()
+
+    _cargar_env()
+    texto = args.texto
+    if args.prueba:
+        texto = TEXTO_DEFAULT
+    elif texto is None and not args.solo_abrir:
+        try:
+            texto = consulta_asistencia()
+        except Exception as e:
+            print("No salió la consulta.")
+            print(" ", str(e))
+            return 1
+        print("Resultado SQL:")
+        print(texto)
+        print()
 
     try:
         from playwright.sync_api import sync_playwright
@@ -297,9 +398,9 @@ def main():
         ok = esperar_sesion(page)
         if ok and not args.solo_abrir:
             if args.para:
-                ok = enviar(page, args.para, args.texto)
+                ok = enviar(page, args.para, texto)
             else:
-                ok = enviar_grupo(page, args.grupo, args.texto)
+                ok = enviar_grupo(page, args.grupo, texto)
         print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
         try:
             input()

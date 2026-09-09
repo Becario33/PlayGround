@@ -16,7 +16,7 @@ cd PlayGround
 
 | Carpeta | Qué es | Arranque |
 |---------|--------|----------|
-| `whatsapp/` | WhatsApp Web con Chrome persistente | `cd whatsapp` → `python main.py` |
+| `whatsapp/` | Consulta SQL Comscore → WhatsApp (Data Analytics) | `cd whatsapp` → `python main.py` |
 | `cinepolis/` | Dictamen: Cinépolis no es cazable como Cinemex | solo `DICTAMEN.md` |
 
 Para uno nuevo: carpeta nueva + `main.py` (si hay código). No sueltes archivos en la raíz.
@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.2.0** — WhatsApp manda asistencia Comscore de ayer
 - **v1.1.1** — WhatsApp: cierra Chrome antes de la segunda corrida
 - **v1.1.0** — Experimentos por carpeta
 - **v1.0.0** — WhatsApp Web con perfil persistente
