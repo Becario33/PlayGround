@@ -22,25 +22,64 @@ def _dir_script():
         return os.getcwd()
 
 
+def _perfil_en_uso(perfil):
+    for nombre in ("SingletonLock", "lockfile", "DevToolsActivePort"):
+        if os.path.exists(os.path.join(perfil, nombre)):
+            return True
+    return False
+
+
 def _lanzar(pw, perfil):
-    args = ["--disable-dev-shm-usage"]
-    try:
-        return pw.chromium.launch_persistent_context(
-            perfil,
-            headless=False,
-            channel="chrome",
-            args=args,
-            locale="es-MX",
-            no_viewport=True,
-        )
-    except Exception:
-        return pw.chromium.launch_persistent_context(
-            perfil,
-            headless=False,
-            args=args,
-            locale="es-MX",
-            no_viewport=True,
-        )
+    comunes = dict(
+        headless=False,
+        locale="es-MX",
+        no_viewport=True,
+        args=["--disable-dev-shm-usage"],
+    )
+    extras = dict(chromium_sandbox=True, ignore_default_args=["--no-sandbox"])
+    ultimo = None
+    for extra in (extras, {}):
+        kwargs = {**comunes, **extra}
+        try:
+            return pw.chromium.launch_persistent_context(
+                perfil, channel="chrome", **kwargs
+            )
+        except TypeError:
+            ultimo = None
+            continue
+        except Exception as e:
+            ultimo = e
+            try:
+                return pw.chromium.launch_persistent_context(perfil, **kwargs)
+            except TypeError:
+                continue
+            except Exception as e2:
+                ultimo = e2
+    if ultimo:
+        raise ultimo
+    return pw.chromium.launch_persistent_context(perfil, **comunes)
+
+
+def _abrir_whatsapp(page):
+    url = page.url or ""
+    if "web.whatsapp.com" in url and url != "about:blank":
+        print("WhatsApp ya estaba en esta ventana.")
+        return True
+    ultimo = None
+    for n in range(1, 4):
+        try:
+            page.goto(URL_WA, wait_until="domcontentloaded", timeout=90000)
+            return True
+        except Exception as e:
+            ultimo = e
+            print(f"Intento {n}/3: no cargó WhatsApp Web.")
+            page.wait_for_timeout(2000)
+    print("No cargó https://web.whatsapp.com/")
+    print("  1) Cierra el Chrome del experimento (la ventana de la corrida anterior) y Enter en esa consola.")
+    print("  2) En el corporativo WhatsApp a veces se corta; reintenta en un rato.")
+    if ultimo is not None:
+        print(" ", str(ultimo).split("\n")[0])
+    return False
 
 
 def _hay_sesion(page):
@@ -238,18 +277,23 @@ def main():
     os.makedirs(perfil, exist_ok=True)
     print("Perfil Chrome (no es tu Chrome de diario):")
     print(" ", perfil)
+    if _perfil_en_uso(perfil):
+        print("Ese perfil parece ocupado. Cierra el Chrome del experimento (corrida anterior) y vuelve a correr.")
 
     with sync_playwright() as pw:
         try:
             ctx = _lanzar(pw, perfil)
         except Exception as e:
             print("No se abrió Chrome.")
+            print("  Cierra la ventana Chrome del experimento si sigue abierta.")
             print("  python -m pip install -r requirements.txt")
             print("  python -m playwright install chromium")
             print(" ", str(e).split("\n")[0])
             return 1
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.goto(URL_WA, wait_until="domcontentloaded", timeout=120000)
+        if not _abrir_whatsapp(page):
+            ctx.close()
+            return 2
         ok = esperar_sesion(page)
         if ok and not args.solo_abrir:
             if args.para:

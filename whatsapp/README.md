@@ -33,8 +33,8 @@ python main.py
 
 1. Primera vez: escanea el QR de WhatsApp Web.
 2. Busca el grupo **Data Analytics** y manda el texto de persistencia.
-3. Enter en la consola (o cierra Chrome) para terminar.
-4. Segunda vez: misma carpeta, sin QR.
+3. Enter en la consola **y cierra esa ventana de Chrome** antes de volver a correr.
+4. Segunda vez: misma carpeta, sin QR. Si dejas el Chrome anterior abierto, la nueva corrida se queda en `about:blank` y WhatsApp no carga.
 
 Opcional:
 
@@ -63,6 +63,7 @@ chrome_whatsapp_perfil/    Sesión local (no se sube)
 
 ## Versiones
 
+- **v1.1.1** — Segunda corrida: cierra Chrome anterior; menos `--no-sandbox`
 - **v1.1.0** — Carpeta `whatsapp/` dentro de PlayGround
 - **v1.0.0** — WhatsApp Web con perfil persistente
 

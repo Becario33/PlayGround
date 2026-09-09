@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.1.1** — WhatsApp: cierra Chrome antes de la segunda corrida
 - **v1.1.0** — Experimentos por carpeta
 - **v1.0.0** — WhatsApp Web con perfil persistente
 
