@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.3.1** — Imagen nítida + botón enviar del preview
 - **v1.3.0** — Captura Excel de la consulta al grupo
 - **v1.2.0** — WhatsApp manda asistencia Comscore de ayer
 - **v1.1.1** — WhatsApp: cierra Chrome antes de la segunda corrida

@@ -76,6 +76,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.3.1** — Imagen nítida y clic en el avión verde
 - **v1.3.0** — Captura Excel al grupo Data Analytics
 - **v1.2.0** — Resultado SQL al grupo Data Analytics
 - **v1.1.1** — Segunda corrida: cierra Chrome anterior; menos `--no-sandbox`

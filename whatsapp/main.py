@@ -170,81 +170,56 @@ def _captura_pillow(xlsx_path, png_path):
     ws = wb.active
     filas = []
     for row in ws.iter_rows(min_row=1, max_col=2, max_row=ws.max_row, values_only=True):
-        filas.append([("" if v is None else str(v)) for v in row])
-    pad, alto, anchos = 12, 28, [240, 260]
-    w = sum(anchos) + pad * 2
-    h = alto * max(len(filas), 1) + pad * 2
+        celdas = []
+        for v in row:
+            if v is None:
+                celdas.append("")
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                celdas.append(f"{int(v):,}")
+            else:
+                celdas.append(str(v))
+        filas.append(celdas)
+    escala, pad, alto = 2, 16, 36
+    anchos = [280, 300]
+    w = (sum(anchos) + pad * 2) * escala
+    h = (alto * max(len(filas), 1) + pad * 2) * escala
     img = Image.new("RGB", (w, h), "white")
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype("arial.ttf", 14)
-        font_b = ImageFont.truetype("arial.ttf", 14)
+        font = ImageFont.truetype("arial.ttf", 16 * escala)
+        font_t = ImageFont.truetype("arialbd.ttf", 18 * escala)
+        font_b = ImageFont.truetype("arialbd.ttf", 16 * escala)
     except Exception:
         font = ImageFont.load_default()
+        font_t = font
         font_b = font
-    y = pad
+    y = pad * escala
     for i, fila in enumerate(filas):
-        x = pad
-        for j, txt in enumerate(fila):
-            box = [x, y, x + anchos[j], y + alto]
-            if i == 1:
-                draw.rectangle(box, fill="#217346", outline="#B0B0B0")
-                draw.text((x + 8, y + 6), txt, fill="white", font=font_b)
-            else:
-                draw.rectangle(box, fill="white", outline="#B0B0B0")
-                draw.text((x + 8, y + 6), txt, fill="#222222", font=font)
-            x += anchos[j]
-        y += alto
+        x = pad * escala
+        ah, aw = alto * escala, [a * escala for a in anchos]
+        if i == 0:
+            box = [x, y, x + sum(aw), y + ah]
+            draw.rectangle(box, fill="white", outline="#D0D0D0")
+            draw.text((x + 10 * escala, y + 8 * escala), fila[0], fill="#217346", font=font_t)
+        else:
+            for j, txt in enumerate(fila):
+                box = [x, y, x + aw[j], y + ah]
+                if i == 1:
+                    draw.rectangle(box, fill="#217346", outline="#1A5C38")
+                    draw.text((x + 10 * escala, y + 8 * escala), txt, fill="white", font=font_b)
+                else:
+                    draw.rectangle(box, fill="white", outline="#C8C8C8")
+                    draw.text((x + 10 * escala, y + 8 * escala), txt, fill="#222222", font=font)
+                x += aw[j]
+        y += ah
     img.save(png_path)
     return png_path
 
 
 def captura_excel(xlsx_path):
     png_path = os.path.splitext(xlsx_path)[0] + ".png"
-    if sys.platform == "win32":
-        excel = None
-        wb = None
-        try:
-            import pythoncom
-            import win32com.client
-            from PIL import ImageGrab
-
-            pythoncom.CoInitialize()
-            excel = win32com.client.DispatchEx("Excel.Application")
-            excel.Visible = False
-            excel.DisplayAlerts = False
-            wb = excel.Workbooks.Open(os.path.abspath(xlsx_path))
-            ws = wb.Worksheets(1)
-            ws.UsedRange.CopyPicture(Appearance=1, Format=2)
-            time.sleep(0.5)
-            img = ImageGrab.grabclipboard()
-            if img is None:
-                raise RuntimeError("El portapapeles no trajo la captura de Excel.")
-            img.save(png_path)
-            print("Captura Excel (COM):")
-            print(" ", png_path)
-            return png_path
-        except Exception as e:
-            print("Excel COM no pudo capturar; uso tabla en imagen.")
-            print(" ", str(e).split("\n")[0])
-        finally:
-            try:
-                if wb is not None:
-                    wb.Close(SaveChanges=False)
-            except Exception:
-                pass
-            try:
-                if excel is not None:
-                    excel.Quit()
-            except Exception:
-                pass
-            try:
-                import pythoncom
-                pythoncom.CoUninitialize()
-            except Exception:
-                pass
     _captura_pillow(xlsx_path, png_path)
-    print("Captura (imagen de tabla):")
+    print("Imagen de la tabla:")
     print(" ", png_path)
     return png_path
 
@@ -421,12 +396,18 @@ def abrir_grupo(page, nombre):
 
 
 def _boton_enviar(page):
-    enviar_btn = page.locator('button[aria-label="Send"]')
-    if enviar_btn.count() == 0:
-        enviar_btn = page.locator('button[aria-label="Enviar"]')
-    if enviar_btn.count() == 0:
-        enviar_btn = page.locator('span[data-icon="send"]')
-    return enviar_btn
+    for sel in (
+        'div[role="button"][aria-label="Send"]',
+        'div[role="button"][aria-label="Enviar"]',
+        'button[aria-label="Send"]',
+        'button[aria-label="Enviar"]',
+        'span[data-icon="send"]',
+        '[data-icon="wds-ic-send-filled"]',
+    ):
+        loc = page.locator(sel)
+        if loc.count():
+            return loc.last
+    return page.locator("button[aria-label='Send']")
 
 
 def enviar_imagen(page, ruta, pie=""):
@@ -452,21 +433,32 @@ def enviar_imagen(page, ruta, pie=""):
         print("No encontré el adjuntar de WhatsApp.")
         return False
     inp.first.set_input_files(os.path.abspath(ruta))
-    page.wait_for_timeout(2500)
-    if pie:
-        caja = _caja_mensaje(page)
-        if caja is not None:
-            caja.click()
-            page.wait_for_timeout(200)
-            page.keyboard.insert_text(pie)
-    btn = _boton_enviar(page)
-    if btn.count():
+    try:
+        page.locator('div[role="button"][aria-label="Send"]').last.wait_for(
+            state="visible", timeout=20000
+        )
+    except Exception:
         try:
-            btn.first.click(timeout=15000)
+            page.locator('div[role="button"][aria-label="Enviar"]').last.wait_for(
+                state="visible", timeout=8000
+            )
         except Exception:
-            page.keyboard.press("Enter")
-    else:
-        page.keyboard.press("Enter")
+            print("No apareció el botón verde de enviar la imagen.")
+            return False
+    if pie:
+        for nombre in ("Add a caption", "Añade un comentario", "Add caption"):
+            cap = page.get_by_role("textbox", name=nombre)
+            if cap.count():
+                cap.last.click()
+                page.wait_for_timeout(200)
+                page.keyboard.insert_text(pie)
+                break
+    btn = _boton_enviar(page)
+    try:
+        btn.click(timeout=15000)
+    except Exception:
+        print("No pude pulsar Enviar en la vista previa.")
+        return False
     page.wait_for_timeout(2500)
     print("Imagen enviada.")
     return True
