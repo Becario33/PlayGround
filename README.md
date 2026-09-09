@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.0** — Captura literal Excel COM (fallback Pillow)
 - **v1.3.8** — Alto de la tabla al texto, sin lienzo blanco
 - **v1.3.7** — Fix import Image en el recorte
 - **v1.3.6** — Recorte dinámico al contenido

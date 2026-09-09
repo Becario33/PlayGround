@@ -155,12 +155,111 @@ def armar_excel(cols, filas):
                         cel.number_format = "#,##0"
                         cel.alignment = Alignment(horizontal="right")
                 cel.border = borde
-    ws.column_dimensions["A"].width = 22
-    ws.column_dimensions["B"].width = 24
+    for i, col in enumerate(cols, 1):
+        letra = ws.cell(2, i).column_letter
+        mx = max(len(str(col)), 8)
+        for fila in filas:
+            if i - 1 < len(fila):
+                v = fila[i - 1]
+                if hasattr(v, "strftime"):
+                    s = v.strftime("%Y-%m-%d")
+                elif isinstance(v, (int, float)):
+                    s = f"{int(v):,}"
+                else:
+                    s = str(v) if v is not None else ""
+                mx = max(mx, len(s))
+        ws.column_dimensions[letra].width = min(mx + 4, 48)
+    if cols:
+        titulo = "Asistencia industria Comscore (ayer)"
+        total = sum(
+            ws.column_dimensions[ws.cell(2, i).column_letter].width or 10
+            for i in range(1, len(cols) + 1)
+        )
+        if total < len(titulo) + 2 and len(cols) >= 1:
+            ultima = ws.cell(2, len(cols)).column_letter
+            extra = (len(titulo) + 2) - total
+            ws.column_dimensions[ultima].width = (
+                ws.column_dimensions[ultima].width or 10
+            ) + extra
     nombre = datetime.now().strftime("asistencia_%Y-%m-%d.xlsx")
     ruta = os.path.join(_dir_resultados(), nombre)
     wb.save(ruta)
     return ruta
+
+
+def _recortar_al_contenido(img, margen=2):
+    from PIL import Image, ImageChops
+
+    fondo = Image.new("RGB", img.size, (255, 255, 255))
+    diff = ImageChops.difference(img.convert("RGB"), fondo)
+    mask = diff.convert("L").point(lambda p: 255 if p > 10 else 0)
+    caja = mask.getbbox()
+    if not caja:
+        return img
+    izq = max(caja[0] - margen, 0)
+    arr = max(caja[1] - margen, 0)
+    der = min(caja[2] + margen, img.width)
+    aba = min(caja[3] + margen, img.height)
+    return img.crop((izq, arr, der, aba))
+
+
+def _captura_excel_com(xlsx_path, jpg_path):
+    """Captura literal del rango usado en Excel (Windows + Excel + pywin32)."""
+    if sys.platform != "win32":
+        raise RuntimeError("Excel COM solo en Windows")
+    try:
+        import pythoncom
+        import win32com.client
+        from PIL import ImageGrab
+    except ImportError as e:
+        raise RuntimeError(
+            "Falta pywin32/Pillow para captura Excel.\n"
+            "  python -m pip install -r requirements.txt"
+        ) from e
+
+    xlsx_abs = os.path.abspath(xlsx_path)
+    jpg_abs = os.path.abspath(jpg_path)
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+    try:
+        excel = win32com.client.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
+        wb = excel.Workbooks.Open(xlsx_abs, ReadOnly=True)
+        ws = wb.Worksheets(1)
+        used = ws.UsedRange
+        if used is None:
+            raise RuntimeError("El Excel no tiene rango usado")
+        try:
+            used.Columns.AutoFit()
+        except Exception:
+            pass
+        # xlScreen=1, xlBitmap=2 → portapapeles como bitmap
+        used.CopyPicture(Appearance=1, Format=2)
+        time.sleep(0.35)
+        img = ImageGrab.grabclipboard()
+        if img is None:
+            raise RuntimeError("El portapapeles no trajo la captura de Excel")
+        img = _recortar_al_contenido(img.convert("RGB"))
+        img.save(jpg_abs, format="JPEG", quality=95)
+        return jpg_abs
+    finally:
+        try:
+            if wb is not None:
+                wb.Close(SaveChanges=False)
+        except Exception:
+            pass
+        try:
+            if excel is not None:
+                excel.Quit()
+        except Exception:
+            pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
 
 
 def _fuente_tabla(escala):
@@ -299,10 +398,19 @@ def _captura_pillow(xlsx_path, jpg_path):
     return jpg_path
 
 
-def captura_excel(xlsx_path):
+def captura_excel(xlsx_path, forzar_pillow=False):
     jpg_path = os.path.splitext(xlsx_path)[0] + ".jpg"
+    if not forzar_pillow and sys.platform == "win32":
+        try:
+            _captura_excel_com(xlsx_path, jpg_path)
+            print("Imagen (captura Excel COM):")
+            print(" ", jpg_path)
+            return jpg_path
+        except Exception as e:
+            print("No salió la captura COM; uso tabla Pillow (v1.3.8).")
+            print(" ", str(e).split("\n")[0])
     _captura_pillow(xlsx_path, jpg_path)
-    print("Imagen (JPEG, no sticker):")
+    print("Imagen (JPEG Pillow):")
     print(" ", jpg_path)
     return jpg_path
 
@@ -627,6 +735,11 @@ def main():
     ap.add_argument("--texto", default=None, help="Texto fijo; si omites, manda el resultado SQL")
     ap.add_argument("--prueba", action="store_true", help="Manda el texto de persistencia, sin SQL")
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
+    ap.add_argument(
+        "--pillow",
+        action="store_true",
+        help="Forzar imagen dibujada (v1.3.8), sin captura COM de Excel",
+    )
     args = ap.parse_args()
 
     _cargar_env()
@@ -640,7 +753,7 @@ def main():
             xlsx = armar_excel(cols, filas)
             print("Excel:")
             print(" ", xlsx)
-            imagen = captura_excel(xlsx)
+            imagen = captura_excel(xlsx, forzar_pillow=args.pillow)
         except Exception as e:
             print("No salió la consulta o la captura.")
             print(" ", str(e))

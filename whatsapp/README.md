@@ -9,7 +9,7 @@ En cada PC nueva hay que escanear el QR. Esa carpeta y el `.env` no se suben a G
 - Python 3.9+
 - Windows (laptop becario), red Cinemex
 - Chrome del sistema
-- Excel (para la captura real; si no, se manda una tabla en imagen)
+- Excel instalado (captura COM del rango; si falla, tabla Pillow)
 - ODBC Driver 17 (o 18) for SQL Server
 
 ```bat
@@ -39,8 +39,8 @@ python main.py
 ```
 
 1. Corre la consulta (asistencia industria de ayer).
-2. Arma el `.xlsx`, captura el rango y abre WhatsApp.
-3. En el grupo Data Analytics manda la **imagen** (el texto de la consulta va de pie).
+2. Arma el `.xlsx`, captura el rango en Excel (o Pillow) y abre WhatsApp.
+3. En el grupo Data Analytics manda solo la **imagen**.
 4. Enter y **cierra Chrome** antes de volver a correr.
 
 Opcional:
@@ -50,18 +50,21 @@ python main.py --prueba
 python main.py --texto "otro mensaje"
 python main.py --grupo "Data Analytics"
 python main.py --solo-abrir
+python main.py --pillow
 ```
+
+`--pillow` fuerza la imagen dibujada (como `v1.3.8`) si la captura COM no convence.
 
 ## Qué hace cada parte
 
 | Parte | Cómo |
 |--------|------|
 | SQL | pyodbc a `Programacion.dbo.ComscoreMPAMexico` (ayer) |
-| Excel | openpyxl en `resultados/` |
-| Captura | Excel COM (Windows) o imagen de tabla |
+| Excel | openpyxl en `resultados/` (ancho dinámico) |
+| Captura | Excel COM (`UsedRange` + autofit); si falla → Pillow |
 | Chrome | Playwright `launch_persistent_context` + Chrome del sistema |
 | Perfil | `chrome_whatsapp_perfil/` junto a `main.py` |
-| WhatsApp | Adjunta el PNG al grupo Data Analytics |
+| WhatsApp | Adjunta el JPEG al grupo Data Analytics |
 
 ## Estructura
 
@@ -70,12 +73,13 @@ main.py                    Arranque
 requirements.txt           Playwright + pyodbc
 .env.example               Plantilla SQL (sin password)
 .env                       Local, no se sube
-resultados/                Excel y PNG locales (no se suben)
+resultados/                Excel y JPEG locales (no se suben)
 chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 ```
 
 ## Versiones
 
+- **v1.4.0** — Captura literal Excel COM (fallback Pillow / `--pillow`)
 - **v1.3.8** — Alto de filas al texto (sin lienzo blanco)
 - **v1.3.7** — Fix recorte (import Image)
 - **v1.3.6** — Recorte dinámico al tamaño de la tabla
