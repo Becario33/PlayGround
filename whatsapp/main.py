@@ -295,6 +295,16 @@ def _captura_pillow(xlsx_path, jpg_path):
     for c in range(ncols - 1):
         x += anchos[c]
         draw.line([(x, altos[0]), (x, h - 1)], fill="#C8C8C8")
+    # Evitar que WhatsApp lo trate como sticker: foto ancha
+    min_w = 1280
+    if tabla.width < min_w:
+        factor = min_w / float(tabla.width)
+        nh = max(1, int(round(tabla.height * factor)))
+        try:
+            resample = Image.Resampling.LANCZOS
+        except AttributeError:
+            resample = Image.LANCZOS
+        tabla = tabla.resize((min_w, nh), resample)
     tabla.save(jpg_path, format="JPEG", quality=95)
     return jpg_path
 
@@ -510,68 +520,111 @@ def enviar_imagen(page, ruta, pie=""):
         return False
     ruta_abs = os.path.abspath(ruta)
 
-    def _input_foto():
-        # Solo Fotos y videos (accept con video). Nunca sticker (png/webp).
-        return page.locator('input[type="file"][accept*="video"]')
-
     def _abrir_clip():
         for sel in (
             'button[aria-label="Attach"]',
             'button[aria-label="Adjuntar"]',
+            '[data-testid="ic-attach-file"]',
+            'span[data-icon="ic-attach-file"]',
             'span[data-icon="plus"]',
             'span[data-icon="attach-menu-plus"]',
-            'div[title="Attach"]',
-            'div[title="Adjuntar"]',
         ):
             loc = page.locator(sel)
             if not loc.count():
                 continue
             try:
-                loc.first.click(timeout=5000)
+                # Clic en el botón (si es el span del icono, subir al button)
+                alvo = loc.first
+                if sel.startswith("span") or "testid" in sel:
+                    btn = page.locator('button[aria-label="Attach"], button[aria-label="Adjuntar"]')
+                    if btn.count():
+                        alvo = btn.first
+                alvo.click(timeout=5000)
                 return True
             except Exception:
                 continue
         return False
 
-    inp = _input_foto()
-    if inp.count() == 0:
-        if not _abrir_clip():
-            print("No encontré el botón Adjuntar.")
-            return False
-        print("Clip abierto; espero input de foto (sin Explorador)...")
-        # Hover (no clic) en Fotos y videos para montar el input sin abrir Explorador
+    def _opcion_fotos():
         for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
+            op = page.get_by_text(nombre, exact=True)
+            if op.count():
+                return op.first
             op = page.get_by_text(nombre, exact=False)
             if op.count():
+                return op.first
+        return None
+
+    def _adjuntar_file_chooser():
+        """Clic en Photos & videos interceptado por Playwright (no Explorador nativo)."""
+        op = _opcion_fotos()
+        if op is None:
+            return False
+        try:
+            with page.expect_file_chooser(timeout=12000) as fc_info:
+                op.click(timeout=5000)
+            fc_info.value.set_files(ruta_abs)
+            print("  Adjunté por file chooser (Photos & videos).")
+            return True
+        except Exception as e:
+            print("  file chooser no salió:", str(e).split("\n")[0])
+            return False
+
+    def _adjuntar_input_oculto():
+        # Inputs bajo el menú; preferir accept con video
+        n = page.locator('input[type="file"]').count()
+        for i in range(n):
+            el = page.locator('input[type="file"]').nth(i)
+            accept = (el.get_attribute("accept") or "").lower()
+            if "webp" in accept and "png" in accept and "video" not in accept and "*" not in accept:
+                continue  # New sticker
+            if "video" in accept or "image" in accept:
                 try:
-                    op.first.hover(timeout=3000)
+                    el.set_input_files(ruta_abs)
+                    print("  Adjunté por input oculto:", accept[:70])
+                    return True
                 except Exception:
-                    pass
-                break
-        for _ in range(24):
-            page.wait_for_timeout(250)
-            inp = _input_foto()
-            if inp.count():
-                break
-    if inp.count() == 0:
+                    continue
+        return False
+
+    # 1) Abrir clip y esperar el menú (Document / Photos & videos / New sticker)
+    if not _abrir_clip():
+        print("No encontré el botón Attach.")
+        return False
+    print("Clip abierto; espero menú...")
+    try:
+        page.get_by_text("Photos & videos", exact=False).first.wait_for(
+            state="visible", timeout=8000
+        )
+    except Exception:
+        try:
+            page.get_by_text("Fotos y videos", exact=False).first.wait_for(
+                state="visible", timeout=4000
+            )
+        except Exception:
+            print("No apareció el menú de adjuntar.")
+            return False
+
+    # 2) Preferir file chooser de Playwright (evita Explorador colgado)
+    ok_adj = _adjuntar_file_chooser()
+    if not ok_adj:
+        print("Reintento por input oculto...")
+        if not _abrir_clip():
+            pass
+        page.wait_for_timeout(500)
+        ok_adj = _adjuntar_input_oculto()
+
+    if not ok_adj:
         accepts = page.evaluate(
             """() => [...document.querySelectorAll('input[type=file]')]
                 .map(el => el.accept || '(vacío)')"""
         )
-        print("No encontré input de Fotos y videos.")
+        print("No pude adjuntar la foto.")
         print("  accept =", accepts)
         try:
             page.keyboard.press("Escape")
         except Exception:
             pass
-        return False
-
-    try:
-        inp.last.set_input_files(ruta_abs)
-        print("  Archivo en input foto.")
-    except Exception as e:
-        print("No pude set_input_files.")
-        print(" ", str(e).split("\n")[0])
         return False
 
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
