@@ -649,89 +649,118 @@ def enviar_imagen(page, ruta, pie=""):
                 continue
         return False
 
-    def _marcar_input_foto():
-        """Marca solo el input de Fotos y videos (nunca stickers)."""
+    def _lista_inputs():
         return page.evaluate(
-            """() => {
-                document.querySelectorAll('[data-wa-foto]').forEach(el => el.removeAttribute('data-wa-foto'));
-                const texts = ['photos & videos', 'fotos y videos', 'photos and videos'];
-                const nodes = [...document.querySelectorAll('li, button, div, span, label')];
-                for (const el of nodes) {
-                    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-                    if (!t || t.length > 40) continue;
-                    if (!texts.some(x => t === x || t.includes(x))) continue;
-                    let root = el.closest('li') || el.closest('[role="button"]') || el.parentElement;
-                    for (let i = 0; i < 5 && root; i++) {
-                        const inp = root.querySelector('input[type="file"]');
-                        if (inp) {
-                            inp.setAttribute('data-wa-foto', '1');
-                            return inp.accept || '';
-                        }
-                        root = root.parentElement;
-                    }
-                }
-                for (const inp of document.querySelectorAll('input[type="file"]')) {
-                    const a = (inp.accept || '').toLowerCase();
-                    if (a.includes('video')) {
-                        inp.setAttribute('data-wa-foto', '1');
-                        return inp.accept || '';
-                    }
-                }
-                return null;
-            }"""
+            """() => [...document.querySelectorAll('input[type="file"]')].map((el, i) => {
+                const a = (el.accept || '').toLowerCase();
+                const sticker = a.includes('webp') && a.includes('png')
+                    && !a.includes('video') && !a.includes('*') && !a.includes('jpeg');
+                const foto = a.includes('video') || a.includes('image/*')
+                    || a.includes('jpeg') || a.includes('jpg') || a.includes('image/');
+                return { i, accept: el.accept || '', sticker, foto };
+            })"""
         )
 
-    def _set_foto():
-        _marcar_input_foto()
-        loc = page.locator('input[type="file"][data-wa-foto="1"]')
-        if not loc.count():
-            # Solo video; jamás png/webp de stickers
-            loc = page.locator('input[type="file"][accept*="video"]')
-        if not loc.count():
-            return False
-        try:
-            loc.last.set_input_files(ruta_abs)
-            acc = loc.last.get_attribute("accept") or ""
-            print("  Adjunté por input foto:", acc[:80])
+    def _hay_preview():
+        if page.locator('div[role="button"][aria-label="Send 1 selected"]').count():
             return True
-        except Exception as e:
-            print("  set_input_files falló:", str(e).split("\n")[0])
-            return False
+        if page.locator('[data-icon="wds-ic-send-filled"]').count():
+            return True
+        if page.locator('div[role="button"][aria-label*="Send"]').count():
+            # Evitar el Send del chat vacío; el preview suele decir "Send 1 selected"
+            pass
+        return page.locator('div[role="button"][aria-label="Send 1 selected"]').count() > 0
 
-    if not _set_foto():
-        if not _abrir_adjuntar():
-            print("No encontré el botón Adjuntar.")
+    def _probar_indice(i, accept):
+        el = page.locator('input[type="file"]').nth(i)
+        try:
+            el.set_input_files(ruta_abs)
+        except Exception as e:
+            print(f"  input[{i}] falló:", str(e).split("\n")[0])
             return False
-        print("Menú Adjuntar abierto; busco input de Fotos y videos...")
-        listo = False
-        for _ in range(24):
-            page.wait_for_timeout(250)
-            if _set_foto():
-                listo = True
-                break
-        if not listo:
-            accepts = page.evaluate(
-                """() => [...document.querySelectorAll('input[type=file]')]
-                    .map(el => el.accept || '(vacío)')"""
-            )
-            print("No pude adjuntar como foto (evito stickers / Explorador).")
-            print("  inputs accept =", accepts)
+        print(f"  Probé input[{i}] accept={accept[:70]!r}")
+        for _ in range(12):
+            page.wait_for_timeout(200)
+            if _hay_preview():
+                print("  Preview de envío OK.")
+                return True
+        return False
+
+    # Siempre abrir clip: los inputs de foto viven en ese menú
+    if not _abrir_adjuntar():
+        print("No encontré el botón Adjuntar.")
+        return False
+    print("Menú Adjuntar abierto.")
+    page.wait_for_timeout(400)
+    # Hover en Fotos y videos para que WhatsApp monte el input (sin clic = sin Explorador)
+    for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
+        op = page.get_by_text(nombre, exact=False)
+        if op.count():
             try:
-                page.keyboard.press("Escape")
+                op.first.hover(timeout=3000)
+                print(f"  Hover en {nombre!r}")
             except Exception:
                 pass
-            return False
+            page.wait_for_timeout(400)
+            break
+
+    inputs = []
+    for _ in range(16):
+        inputs = _lista_inputs()
+        if any((not x.get("sticker")) for x in inputs):
+            break
+        page.wait_for_timeout(250)
+    if not inputs:
+        print("No apareció ningún input[type=file].")
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+        return False
+
+    print("  inputs:", [(x["i"], x["accept"][:60], "sticker" if x["sticker"] else "ok") for x in inputs])
+
+    # Orden: foto/video primero; nunca sticker
+    orden = sorted(
+        inputs,
+        key=lambda x: (
+            0 if ("video" in (x["accept"] or "").lower()) else 1,
+            0 if x.get("foto") else 1,
+            1 if x.get("sticker") else 0,
+            x["i"],
+        ),
+    )
+    adjunto = False
+    for x in orden:
+        if x.get("sticker"):
+            print(f"  Salto sticker input[{x['i']}]")
+            continue
+        if _probar_indice(x["i"], x["accept"]):
+            adjunto = True
+            break
+        # Si no hubo preview, reabrir menú por si se cerró
+        if page.locator('input[type="file"]').count() == 0:
+            _abrir_adjuntar()
+            page.wait_for_timeout(500)
+
+    if not adjunto:
+        print("Ningún input de foto abrió el preview (evité stickers).")
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+        return False
 
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
-        media.wait_for(state="visible", timeout=25000)
+        media.wait_for(state="visible", timeout=8000)
     except Exception:
         alt = page.locator('[data-icon="wds-ic-send-filled"]')
         if not alt.count():
             print("No apareció Send 1 selected.")
             return False
         media = alt.first
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(400)
     try:
         media.click(timeout=8000, force=True)
     except Exception:

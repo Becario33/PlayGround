@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.6** — Clip: prueba inputs hasta preview; hover Fotos/videos
 - **v1.4.5** — Foto real: JPEG ≥1280×720 + solo input Fotos/videos
 - **v1.4.4** — Adjunto sin Explorador (input oculto tras el clip)
 - **v1.4.3** — Foto (no sticker) + tabla sin bordes grises

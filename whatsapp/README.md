@@ -79,6 +79,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.6** — Adjunto: hover + prueba inputs hasta preview
 - **v1.4.5** — Anti-sticker: escala ≥1280×720 y solo Fotos/videos
 - **v1.4.4** — Clip: adjunta por input oculto, sin Explorador
 - **v1.4.3** — Foto por Fotos y videos (no sticker) + sin bordes
