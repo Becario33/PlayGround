@@ -508,33 +508,72 @@ def enviar_imagen(page, ruta, pie=""):
     if not os.path.isfile(ruta):
         print("No está el JPEG de la captura.")
         return False
-    inp = page.locator('input[type="file"][accept*="video"]')
-    if inp.count() == 0:
+    ruta_abs = os.path.abspath(ruta)
+
+    def _input_foto():
+        # Solo Fotos y videos (accept con video). Nunca sticker (png/webp).
+        return page.locator('input[type="file"][accept*="video"]')
+
+    def _abrir_clip():
         for sel in (
             'button[aria-label="Attach"]',
             'button[aria-label="Adjuntar"]',
             'span[data-icon="plus"]',
             'span[data-icon="attach-menu-plus"]',
             'div[title="Attach"]',
+            'div[title="Adjuntar"]',
         ):
             loc = page.locator(sel)
-            if loc.count():
-                loc.first.click()
-                page.wait_for_timeout(500)
-                break
+            if not loc.count():
+                continue
+            try:
+                loc.first.click(timeout=5000)
+                return True
+            except Exception:
+                continue
+        return False
+
+    inp = _input_foto()
+    if inp.count() == 0:
+        if not _abrir_clip():
+            print("No encontré el botón Adjuntar.")
+            return False
+        print("Clip abierto; espero input de foto (sin Explorador)...")
+        # Hover (no clic) en Fotos y videos para montar el input sin abrir Explorador
         for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
             op = page.get_by_text(nombre, exact=False)
             if op.count():
-                op.first.click()
-                page.wait_for_timeout(400)
+                try:
+                    op.first.hover(timeout=3000)
+                except Exception:
+                    pass
                 break
-        inp = page.locator('input[type="file"][accept*="video"]')
+        for _ in range(24):
+            page.wait_for_timeout(250)
+            inp = _input_foto()
+            if inp.count():
+                break
     if inp.count() == 0:
-        inp = page.locator('input[type="file"][accept*="image"]')
-    if inp.count() == 0:
-        print("No encontré Fotos y videos de WhatsApp.")
+        accepts = page.evaluate(
+            """() => [...document.querySelectorAll('input[type=file]')]
+                .map(el => el.accept || '(vacío)')"""
+        )
+        print("No encontré input de Fotos y videos.")
+        print("  accept =", accepts)
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
         return False
-    inp.last.set_input_files(os.path.abspath(ruta))
+
+    try:
+        inp.last.set_input_files(ruta_abs)
+        print("  Archivo en input foto.")
+    except Exception as e:
+        print("No pude set_input_files.")
+        print(" ", str(e).split("\n")[0])
+        return False
+
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
         media.wait_for(state="visible", timeout=25000)
@@ -680,10 +719,15 @@ def main():
             return 2
         ok = esperar_sesion(page)
         if ok and not args.solo_abrir:
-            if args.para:
-                ok = enviar(page, args.para, texto)
-            else:
-                ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
+            try:
+                if args.para:
+                    ok = enviar(page, args.para, texto)
+                else:
+                    ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
+            except Exception as e:
+                print("Falló el envío (Chrome sigue abierto).")
+                print(" ", str(e).split("\n")[0])
+                ok = False
         print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
         try:
             input()

@@ -75,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.8** — Envío sin Explorador (clip + input video)
 - **v1.4.7** — Restaura `main.py` de `v1.3.8` (foto estable)
 - **v1.4.6** — Adjunto: hover + prueba inputs hasta preview
 - **v1.4.5** — Anti-sticker: escala ≥1280×720 y solo Fotos/videos

@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.8** — Envío: clip + input foto, sin clic al Explorador
 - **v1.4.7** — Restaura lógica estable de `v1.3.8` (foto, no sticker)
 - **v1.4.6** — Clip: prueba inputs hasta preview; hover Fotos/videos
 - **v1.4.5** — Foto real: JPEG ≥1280×720 + solo input Fotos/videos
