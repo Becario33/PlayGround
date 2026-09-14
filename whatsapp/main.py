@@ -384,17 +384,20 @@ def _captura_pillow(xlsx_path, jpg_path):
                 x += anchos[j]
         y += ah
 
-    min_w = 1100
-    if tabla.width < min_w:
-        factor = min_w / float(tabla.width)
-        nw = min_w
+    # WhatsApp manda como sticker si queda muy baja/chica: escalar (sin lienzo blanco)
+    min_w, min_h = 1280, 720
+    factor = max(min_w / float(tabla.width), min_h / float(tabla.height), 1.0)
+    if factor > 1.0:
+        nw = max(1, int(round(tabla.width * factor)))
         nh = max(1, int(round(tabla.height * factor)))
         try:
             resample = Image.Resampling.LANCZOS
         except AttributeError:
             resample = Image.LANCZOS
         tabla = tabla.resize((nw, nh), resample)
-    tabla.save(jpg_path, format="JPEG", quality=95)
+    tabla = tabla.convert("RGB")
+    tabla.save(jpg_path, format="JPEG", quality=95, optimize=True)
+    print("  JPEG foto:", tabla.size[0], "x", tabla.size[1])
     return jpg_path
 
 
@@ -646,49 +649,62 @@ def enviar_imagen(page, ruta, pie=""):
                 continue
         return False
 
-    def _es_sticker(accept):
-        a = (accept or "").lower()
-        if "video" in a:
-            return False
-        # Stickers: casi siempre png/webp sin jpeg ni image/*
-        if "webp" in a and "png" in a and "jpeg" not in a and "jpg" not in a and "image/*" not in a:
-            return True
-        return False
+    def _marcar_input_foto():
+        """Marca solo el input de Fotos y videos (nunca stickers)."""
+        return page.evaluate(
+            """() => {
+                document.querySelectorAll('[data-wa-foto]').forEach(el => el.removeAttribute('data-wa-foto'));
+                const texts = ['photos & videos', 'fotos y videos', 'photos and videos'];
+                const nodes = [...document.querySelectorAll('li, button, div, span, label')];
+                for (const el of nodes) {
+                    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+                    if (!t || t.length > 40) continue;
+                    if (!texts.some(x => t === x || t.includes(x))) continue;
+                    let root = el.closest('li') || el.closest('[role="button"]') || el.parentElement;
+                    for (let i = 0; i < 5 && root; i++) {
+                        const inp = root.querySelector('input[type="file"]');
+                        if (inp) {
+                            inp.setAttribute('data-wa-foto', '1');
+                            return inp.accept || '';
+                        }
+                        root = root.parentElement;
+                    }
+                }
+                for (const inp of document.querySelectorAll('input[type="file"]')) {
+                    const a = (inp.accept || '').toLowerCase();
+                    if (a.includes('video')) {
+                        inp.setAttribute('data-wa-foto', '1');
+                        return inp.accept || '';
+                    }
+                }
+                return null;
+            }"""
+        )
 
     def _set_foto():
-        n = page.locator('input[type="file"]').count()
-        # 1) Preferir Fotos y videos (accept con video)
-        for i in range(n):
-            el = page.locator('input[type="file"]').nth(i)
-            accept = el.get_attribute("accept") or ""
-            if "video" in accept.lower():
-                try:
-                    el.set_input_files(ruta_abs)
-                    return True
-                except Exception:
-                    continue
-        # 2) Cualquier image/* / jpeg que no sea sticker
-        for i in range(n):
-            el = page.locator('input[type="file"]').nth(i)
-            accept = el.get_attribute("accept") or ""
-            if _es_sticker(accept):
-                continue
-            if "image" in accept.lower() or accept == "":
-                try:
-                    el.set_input_files(ruta_abs)
-                    return True
-                except Exception:
-                    continue
-        return False
+        _marcar_input_foto()
+        loc = page.locator('input[type="file"][data-wa-foto="1"]')
+        if not loc.count():
+            # Solo video; jamás png/webp de stickers
+            loc = page.locator('input[type="file"][accept*="video"]')
+        if not loc.count():
+            return False
+        try:
+            loc.last.set_input_files(ruta_abs)
+            acc = loc.last.get_attribute("accept") or ""
+            print("  Adjunté por input foto:", acc[:80])
+            return True
+        except Exception as e:
+            print("  set_input_files falló:", str(e).split("\n")[0])
+            return False
 
-    # Primero intenta sin abrir menú; si no, clip y espera inputs
     if not _set_foto():
         if not _abrir_adjuntar():
             print("No encontré el botón Adjuntar.")
             return False
-        print("Menú Adjuntar abierto; busco input de foto...")
+        print("Menú Adjuntar abierto; busco input de Fotos y videos...")
         listo = False
-        for _ in range(20):
+        for _ in range(24):
             page.wait_for_timeout(250)
             if _set_foto():
                 listo = True
@@ -698,7 +714,7 @@ def enviar_imagen(page, ruta, pie=""):
                 """() => [...document.querySelectorAll('input[type=file]')]
                     .map(el => el.accept || '(vacío)')"""
             )
-            print("No pude adjuntar la foto (sin Explorador).")
+            print("No pude adjuntar como foto (evito stickers / Explorador).")
             print("  inputs accept =", accepts)
             try:
                 page.keyboard.press("Escape")
@@ -710,13 +726,12 @@ def enviar_imagen(page, ruta, pie=""):
     try:
         media.wait_for(state="visible", timeout=25000)
     except Exception:
-        # A veces el aria-label cambia; probar el avión
         alt = page.locator('[data-icon="wds-ic-send-filled"]')
         if not alt.count():
             print("No apareció Send 1 selected.")
             return False
         media = alt.first
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(500)
     try:
         media.click(timeout=8000, force=True)
     except Exception:
