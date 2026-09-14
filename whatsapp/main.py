@@ -384,16 +384,16 @@ def _captura_pillow(xlsx_path, jpg_path):
                 x += anchos[j]
         y += ah
 
-    draw = ImageDraw.Draw(tabla)
-    draw.rectangle([0, 0, w - 1, h - 1], outline="#C8C8C8")
-    y = 0
-    for ah in altos[:-1]:
-        y += ah
-        draw.line([(0, y), (w - 1, y)], fill="#C8C8C8")
-    x = 0
-    for c in range(ncols - 1):
-        x += anchos[c]
-        draw.line([(x, altos[0]), (x, h - 1)], fill="#C8C8C8")
+    min_w = 1100
+    if tabla.width < min_w:
+        factor = min_w / float(tabla.width)
+        nw = min_w
+        nh = max(1, int(round(tabla.height * factor)))
+        try:
+            resample = Image.Resampling.LANCZOS
+        except AttributeError:
+            resample = Image.LANCZOS
+        tabla = tabla.resize((nw, nh), resample)
     tabla.save(jpg_path, format="JPEG", quality=95)
     return jpg_path
 
@@ -627,23 +627,18 @@ def enviar_imagen(page, ruta, pie=""):
         return False
     ruta_abs = os.path.abspath(ruta)
 
-    def _set_en_input():
-        # Fotos y videos (accept con video). Evita el input de stickers.
-        for sel in (
-            'input[type="file"][accept*="video"]',
-            'input[type="file"][accept*="image"]',
-        ):
-            loc = page.locator(sel)
-            if not loc.count():
-                continue
-            try:
-                loc.last.set_input_files(ruta_abs)
-                return True
-            except Exception:
-                continue
-        return False
+    def _set_foto():
+        # Solo input de Fotos y videos (accept con video). Nunca el de stickers.
+        loc = page.locator('input[type="file"][accept*="video"]')
+        if not loc.count():
+            return False
+        try:
+            loc.last.set_input_files(ruta_abs)
+            return True
+        except Exception:
+            return False
 
-    if not _set_en_input():
+    if not _set_foto():
         for sel in (
             'button[aria-label="Attach"]',
             'button[aria-label="Adjuntar"]',
@@ -659,8 +654,7 @@ def enviar_imagen(page, ruta, pie=""):
                     continue
                 page.wait_for_timeout(500)
                 break
-        # Con el menú abierto: llenar el input oculto (sin abrir el Explorador)
-        if not _set_en_input():
+        if not _set_foto():
             adjunto = False
             for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
                 op = page.get_by_text(nombre, exact=False)
@@ -680,8 +674,8 @@ def enviar_imagen(page, ruta, pie=""):
                     except Exception:
                         pass
                     page.wait_for_timeout(300)
-            if not adjunto and not _set_en_input():
-                print("No encontré cómo adjuntar Fotos y videos.")
+            if not adjunto and not _set_foto():
+                print("No encontré Fotos y videos (evito stickers).")
                 return False
 
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
@@ -703,7 +697,7 @@ def enviar_imagen(page, ruta, pie=""):
             print("El preview sigue abierto; no envió.")
             return False
         page.wait_for_timeout(1500)
-    print("Imagen enviada.")
+    print("Imagen enviada (foto, no sticker).")
     return True
 
 

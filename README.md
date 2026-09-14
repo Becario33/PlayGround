@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.3** — Foto (no sticker) + tabla sin bordes grises
 - **v1.4.2** — Por defecto Pillow estable; COM opcional
 - **v1.4.1** — Adjunto WhatsApp sin pelear con el Explorador
 - **v1.4.0** — Captura literal Excel COM (fallback Pillow)
