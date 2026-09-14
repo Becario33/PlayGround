@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.2** — Por defecto Pillow estable; COM opcional
 - **v1.4.1** — Adjunto WhatsApp sin pelear con el Explorador
 - **v1.4.0** — Captura literal Excel COM (fallback Pillow)
 - **v1.3.8** — Alto de la tabla al texto, sin lienzo blanco

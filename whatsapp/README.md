@@ -39,7 +39,7 @@ python main.py
 ```
 
 1. Corre la consulta (asistencia industria de ayer).
-2. Arma el `.xlsx`, captura el rango en Excel (o Pillow) y abre WhatsApp.
+2. Arma el `.xlsx`, dibuja la tabla (Pillow estable) y abre WhatsApp.
 3. En el grupo Data Analytics manda solo la **imagen**.
 4. Enter y **cierra Chrome** antes de volver a correr.
 
@@ -50,10 +50,10 @@ python main.py --prueba
 python main.py --texto "otro mensaje"
 python main.py --grupo "Data Analytics"
 python main.py --solo-abrir
-python main.py --pillow
+python main.py --excel-com
 ```
 
-`--pillow` fuerza la imagen dibujada (como `v1.3.8`) si la captura COM no convence.
+`--excel-com` prueba captura literal de Excel (si falla o sale en blanco, cae a Pillow).
 
 ## Qué hace cada parte
 
@@ -61,7 +61,7 @@ python main.py --pillow
 |--------|------|
 | SQL | pyodbc a `Programacion.dbo.ComscoreMPAMexico` (ayer) |
 | Excel | openpyxl en `resultados/` (ancho dinámico) |
-| Captura | Excel COM (`UsedRange` + autofit); si falla → Pillow |
+| Captura | Pillow estable (estilo `v1.3.8`); opcional `--excel-com` |
 | Chrome | Playwright `launch_persistent_context` + Chrome del sistema |
 | Perfil | `chrome_whatsapp_perfil/` junto a `main.py` |
 | WhatsApp | Adjunta el JPEG al grupo Data Analytics |
@@ -79,6 +79,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.2** — Por defecto Pillow estable; COM solo con `--excel-com`
 - **v1.4.1** — Adjunto sin Explorador (input oculto / file chooser)
 - **v1.4.0** — Captura literal Excel COM (fallback Pillow / `--pillow`)
 - **v1.3.8** — Alto de filas al texto (sin lienzo blanco)

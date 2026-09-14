@@ -398,19 +398,28 @@ def _captura_pillow(xlsx_path, jpg_path):
     return jpg_path
 
 
-def captura_excel(xlsx_path, forzar_pillow=False):
+def captura_excel(xlsx_path, usar_com=False):
+    """Por defecto Pillow (estable v1.3.8). COM solo con usar_com=True."""
     jpg_path = os.path.splitext(xlsx_path)[0] + ".jpg"
-    if not forzar_pillow and sys.platform == "win32":
+    if usar_com and sys.platform == "win32":
         try:
             _captura_excel_com(xlsx_path, jpg_path)
+            from PIL import Image
+
+            img = Image.open(jpg_path).convert("RGB")
+            # COM a veces deja un JPEG casi blanco (WhatsApp lo ve raro / sticker vacío)
+            extrema = img.getextrema()
+            casi_blanco = all(lo >= 250 for lo, _hi in extrema)
+            if casi_blanco or min(img.size) < 20:
+                raise RuntimeError("Captura COM vacía o casi blanca")
             print("Imagen (captura Excel COM):")
             print(" ", jpg_path)
             return jpg_path
         except Exception as e:
-            print("No salió la captura COM; uso tabla Pillow (v1.3.8).")
+            print("No salió la captura COM; uso tabla Pillow (estable).")
             print(" ", str(e).split("\n")[0])
     _captura_pillow(xlsx_path, jpg_path)
-    print("Imagen (JPEG Pillow):")
+    print("Imagen (JPEG Pillow, estable):")
     print(" ", jpg_path)
     return jpg_path
 
@@ -768,9 +777,9 @@ def main():
     ap.add_argument("--prueba", action="store_true", help="Manda el texto de persistencia, sin SQL")
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
     ap.add_argument(
-        "--pillow",
+        "--excel-com",
         action="store_true",
-        help="Forzar imagen dibujada (v1.3.8), sin captura COM de Excel",
+        help="Probar captura literal Excel COM (por defecto usa Pillow estable)",
     )
     args = ap.parse_args()
 
@@ -785,7 +794,7 @@ def main():
             xlsx = armar_excel(cols, filas)
             print("Excel:")
             print(" ", xlsx)
-            imagen = captura_excel(xlsx, forzar_pillow=args.pillow)
+            imagen = captura_excel(xlsx, usar_com=args.excel_com)
         except Exception as e:
             print("No salió la consulta o la captura.")
             print(" ", str(e))
