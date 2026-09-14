@@ -9,7 +9,6 @@ En cada PC nueva hay que escanear el QR. Esa carpeta y el `.env` no se suben a G
 - Python 3.9+
 - Windows (laptop becario), red Cinemex
 - Chrome del sistema
-- Excel instalado (captura COM del rango; si falla, tabla Pillow)
 - ODBC Driver 17 (o 18) for SQL Server
 
 ```bat
@@ -39,7 +38,7 @@ python main.py
 ```
 
 1. Corre la consulta (asistencia industria de ayer).
-2. Arma el `.xlsx`, dibuja la tabla (Pillow estable) y abre WhatsApp.
+2. Arma el `.xlsx`, dibuja la tabla (Pillow) y abre WhatsApp.
 3. En el grupo Data Analytics manda solo la **imagen**.
 4. Enter y **cierra Chrome** antes de volver a correr.
 
@@ -50,21 +49,18 @@ python main.py --prueba
 python main.py --texto "otro mensaje"
 python main.py --grupo "Data Analytics"
 python main.py --solo-abrir
-python main.py --excel-com
 ```
-
-`--excel-com` prueba captura literal de Excel (si falla o sale en blanco, cae a Pillow).
 
 ## Qué hace cada parte
 
 | Parte | Cómo |
 |--------|------|
 | SQL | pyodbc a `Programacion.dbo.ComscoreMPAMexico` (ayer) |
-| Excel | openpyxl en `resultados/` (ancho dinámico) |
-| Captura | Pillow estable (estilo `v1.3.8`); opcional `--excel-com` |
+| Excel | openpyxl en `resultados/` |
+| Captura | Pillow (tabla JPEG, estilo `v1.3.8`) |
 | Chrome | Playwright `launch_persistent_context` + Chrome del sistema |
 | Perfil | `chrome_whatsapp_perfil/` junto a `main.py` |
-| WhatsApp | Adjunta el JPEG al grupo Data Analytics |
+| WhatsApp | JPEG por Fotos y videos al grupo Data Analytics |
 
 ## Estructura
 
@@ -79,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.7** — Restaura `main.py` de `v1.3.8` (foto estable)
 - **v1.4.6** — Adjunto: hover + prueba inputs hasta preview
 - **v1.4.5** — Anti-sticker: escala ≥1280×720 y solo Fotos/videos
 - **v1.4.4** — Clip: adjunta por input oculto, sin Explorador

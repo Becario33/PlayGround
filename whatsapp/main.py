@@ -155,111 +155,12 @@ def armar_excel(cols, filas):
                         cel.number_format = "#,##0"
                         cel.alignment = Alignment(horizontal="right")
                 cel.border = borde
-    for i, col in enumerate(cols, 1):
-        letra = ws.cell(2, i).column_letter
-        mx = max(len(str(col)), 8)
-        for fila in filas:
-            if i - 1 < len(fila):
-                v = fila[i - 1]
-                if hasattr(v, "strftime"):
-                    s = v.strftime("%Y-%m-%d")
-                elif isinstance(v, (int, float)):
-                    s = f"{int(v):,}"
-                else:
-                    s = str(v) if v is not None else ""
-                mx = max(mx, len(s))
-        ws.column_dimensions[letra].width = min(mx + 4, 48)
-    if cols:
-        titulo = "Asistencia industria Comscore (ayer)"
-        total = sum(
-            ws.column_dimensions[ws.cell(2, i).column_letter].width or 10
-            for i in range(1, len(cols) + 1)
-        )
-        if total < len(titulo) + 2 and len(cols) >= 1:
-            ultima = ws.cell(2, len(cols)).column_letter
-            extra = (len(titulo) + 2) - total
-            ws.column_dimensions[ultima].width = (
-                ws.column_dimensions[ultima].width or 10
-            ) + extra
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 24
     nombre = datetime.now().strftime("asistencia_%Y-%m-%d.xlsx")
     ruta = os.path.join(_dir_resultados(), nombre)
     wb.save(ruta)
     return ruta
-
-
-def _recortar_al_contenido(img, margen=2):
-    from PIL import Image, ImageChops
-
-    fondo = Image.new("RGB", img.size, (255, 255, 255))
-    diff = ImageChops.difference(img.convert("RGB"), fondo)
-    mask = diff.convert("L").point(lambda p: 255 if p > 10 else 0)
-    caja = mask.getbbox()
-    if not caja:
-        return img
-    izq = max(caja[0] - margen, 0)
-    arr = max(caja[1] - margen, 0)
-    der = min(caja[2] + margen, img.width)
-    aba = min(caja[3] + margen, img.height)
-    return img.crop((izq, arr, der, aba))
-
-
-def _captura_excel_com(xlsx_path, jpg_path):
-    """Captura literal del rango usado en Excel (Windows + Excel + pywin32)."""
-    if sys.platform != "win32":
-        raise RuntimeError("Excel COM solo en Windows")
-    try:
-        import pythoncom
-        import win32com.client
-        from PIL import ImageGrab
-    except ImportError as e:
-        raise RuntimeError(
-            "Falta pywin32/Pillow para captura Excel.\n"
-            "  python -m pip install -r requirements.txt"
-        ) from e
-
-    xlsx_abs = os.path.abspath(xlsx_path)
-    jpg_abs = os.path.abspath(jpg_path)
-    pythoncom.CoInitialize()
-    excel = None
-    wb = None
-    try:
-        excel = win32com.client.DispatchEx("Excel.Application")
-        excel.Visible = False
-        excel.DisplayAlerts = False
-        excel.ScreenUpdating = False
-        wb = excel.Workbooks.Open(xlsx_abs, ReadOnly=True)
-        ws = wb.Worksheets(1)
-        used = ws.UsedRange
-        if used is None:
-            raise RuntimeError("El Excel no tiene rango usado")
-        try:
-            used.Columns.AutoFit()
-        except Exception:
-            pass
-        # xlScreen=1, xlBitmap=2 → portapapeles como bitmap
-        used.CopyPicture(Appearance=1, Format=2)
-        time.sleep(0.35)
-        img = ImageGrab.grabclipboard()
-        if img is None:
-            raise RuntimeError("El portapapeles no trajo la captura de Excel")
-        img = _recortar_al_contenido(img.convert("RGB"))
-        img.save(jpg_abs, format="JPEG", quality=95)
-        return jpg_abs
-    finally:
-        try:
-            if wb is not None:
-                wb.Close(SaveChanges=False)
-        except Exception:
-            pass
-        try:
-            if excel is not None:
-                excel.Quit()
-        except Exception:
-            pass
-        try:
-            pythoncom.CoUninitialize()
-        except Exception:
-            pass
 
 
 def _fuente_tabla(escala):
@@ -384,45 +285,24 @@ def _captura_pillow(xlsx_path, jpg_path):
                 x += anchos[j]
         y += ah
 
-    # WhatsApp manda como sticker si queda muy baja/chica: escalar (sin lienzo blanco)
-    min_w, min_h = 1280, 720
-    factor = max(min_w / float(tabla.width), min_h / float(tabla.height), 1.0)
-    if factor > 1.0:
-        nw = max(1, int(round(tabla.width * factor)))
-        nh = max(1, int(round(tabla.height * factor)))
-        try:
-            resample = Image.Resampling.LANCZOS
-        except AttributeError:
-            resample = Image.LANCZOS
-        tabla = tabla.resize((nw, nh), resample)
-    tabla = tabla.convert("RGB")
-    tabla.save(jpg_path, format="JPEG", quality=95, optimize=True)
-    print("  JPEG foto:", tabla.size[0], "x", tabla.size[1])
+    draw = ImageDraw.Draw(tabla)
+    draw.rectangle([0, 0, w - 1, h - 1], outline="#C8C8C8")
+    y = 0
+    for ah in altos[:-1]:
+        y += ah
+        draw.line([(0, y), (w - 1, y)], fill="#C8C8C8")
+    x = 0
+    for c in range(ncols - 1):
+        x += anchos[c]
+        draw.line([(x, altos[0]), (x, h - 1)], fill="#C8C8C8")
+    tabla.save(jpg_path, format="JPEG", quality=95)
     return jpg_path
 
 
-def captura_excel(xlsx_path, usar_com=False):
-    """Por defecto Pillow (estable v1.3.8). COM solo con usar_com=True."""
+def captura_excel(xlsx_path):
     jpg_path = os.path.splitext(xlsx_path)[0] + ".jpg"
-    if usar_com and sys.platform == "win32":
-        try:
-            _captura_excel_com(xlsx_path, jpg_path)
-            from PIL import Image
-
-            img = Image.open(jpg_path).convert("RGB")
-            # COM a veces deja un JPEG casi blanco (WhatsApp lo ve raro / sticker vacío)
-            extrema = img.getextrema()
-            casi_blanco = all(lo >= 250 for lo, _hi in extrema)
-            if casi_blanco or min(img.size) < 20:
-                raise RuntimeError("Captura COM vacía o casi blanca")
-            print("Imagen (captura Excel COM):")
-            print(" ", jpg_path)
-            return jpg_path
-        except Exception as e:
-            print("No salió la captura COM; uso tabla Pillow (estable).")
-            print(" ", str(e).split("\n")[0])
     _captura_pillow(xlsx_path, jpg_path)
-    print("Imagen (JPEG Pillow, estable):")
+    print("Imagen (JPEG, no sticker):")
     print(" ", jpg_path)
     return jpg_path
 
@@ -628,138 +508,39 @@ def enviar_imagen(page, ruta, pie=""):
     if not os.path.isfile(ruta):
         print("No está el JPEG de la captura.")
         return False
-    ruta_abs = os.path.abspath(ruta)
-
-    def _abrir_adjuntar():
+    inp = page.locator('input[type="file"][accept*="video"]')
+    if inp.count() == 0:
         for sel in (
             'button[aria-label="Attach"]',
             'button[aria-label="Adjuntar"]',
             'span[data-icon="plus"]',
             'span[data-icon="attach-menu-plus"]',
             'div[title="Attach"]',
-            'div[title="Adjuntar"]',
         ):
             loc = page.locator(sel)
-            if not loc.count():
-                continue
-            try:
-                loc.first.click(timeout=4000)
-                return True
-            except Exception:
-                continue
+            if loc.count():
+                loc.first.click()
+                page.wait_for_timeout(500)
+                break
+        for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
+            op = page.get_by_text(nombre, exact=False)
+            if op.count():
+                op.first.click()
+                page.wait_for_timeout(400)
+                break
+        inp = page.locator('input[type="file"][accept*="video"]')
+    if inp.count() == 0:
+        inp = page.locator('input[type="file"][accept*="image"]')
+    if inp.count() == 0:
+        print("No encontré Fotos y videos de WhatsApp.")
         return False
-
-    def _lista_inputs():
-        return page.evaluate(
-            """() => [...document.querySelectorAll('input[type="file"]')].map((el, i) => {
-                const a = (el.accept || '').toLowerCase();
-                const sticker = a.includes('webp') && a.includes('png')
-                    && !a.includes('video') && !a.includes('*') && !a.includes('jpeg');
-                const foto = a.includes('video') || a.includes('image/*')
-                    || a.includes('jpeg') || a.includes('jpg') || a.includes('image/');
-                return { i, accept: el.accept || '', sticker, foto };
-            })"""
-        )
-
-    def _hay_preview():
-        if page.locator('div[role="button"][aria-label="Send 1 selected"]').count():
-            return True
-        if page.locator('[data-icon="wds-ic-send-filled"]').count():
-            return True
-        if page.locator('div[role="button"][aria-label*="Send"]').count():
-            # Evitar el Send del chat vacío; el preview suele decir "Send 1 selected"
-            pass
-        return page.locator('div[role="button"][aria-label="Send 1 selected"]').count() > 0
-
-    def _probar_indice(i, accept):
-        el = page.locator('input[type="file"]').nth(i)
-        try:
-            el.set_input_files(ruta_abs)
-        except Exception as e:
-            print(f"  input[{i}] falló:", str(e).split("\n")[0])
-            return False
-        print(f"  Probé input[{i}] accept={accept[:70]!r}")
-        for _ in range(12):
-            page.wait_for_timeout(200)
-            if _hay_preview():
-                print("  Preview de envío OK.")
-                return True
-        return False
-
-    # Siempre abrir clip: los inputs de foto viven en ese menú
-    if not _abrir_adjuntar():
-        print("No encontré el botón Adjuntar.")
-        return False
-    print("Menú Adjuntar abierto.")
-    page.wait_for_timeout(400)
-    # Hover en Fotos y videos para que WhatsApp monte el input (sin clic = sin Explorador)
-    for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
-        op = page.get_by_text(nombre, exact=False)
-        if op.count():
-            try:
-                op.first.hover(timeout=3000)
-                print(f"  Hover en {nombre!r}")
-            except Exception:
-                pass
-            page.wait_for_timeout(400)
-            break
-
-    inputs = []
-    for _ in range(16):
-        inputs = _lista_inputs()
-        if any((not x.get("sticker")) for x in inputs):
-            break
-        page.wait_for_timeout(250)
-    if not inputs:
-        print("No apareció ningún input[type=file].")
-        try:
-            page.keyboard.press("Escape")
-        except Exception:
-            pass
-        return False
-
-    print("  inputs:", [(x["i"], x["accept"][:60], "sticker" if x["sticker"] else "ok") for x in inputs])
-
-    # Orden: foto/video primero; nunca sticker
-    orden = sorted(
-        inputs,
-        key=lambda x: (
-            0 if ("video" in (x["accept"] or "").lower()) else 1,
-            0 if x.get("foto") else 1,
-            1 if x.get("sticker") else 0,
-            x["i"],
-        ),
-    )
-    adjunto = False
-    for x in orden:
-        if x.get("sticker"):
-            print(f"  Salto sticker input[{x['i']}]")
-            continue
-        if _probar_indice(x["i"], x["accept"]):
-            adjunto = True
-            break
-        # Si no hubo preview, reabrir menú por si se cerró
-        if page.locator('input[type="file"]').count() == 0:
-            _abrir_adjuntar()
-            page.wait_for_timeout(500)
-
-    if not adjunto:
-        print("Ningún input de foto abrió el preview (evité stickers).")
-        try:
-            page.keyboard.press("Escape")
-        except Exception:
-            pass
-        return False
-
+    inp.last.set_input_files(os.path.abspath(ruta))
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
-        media.wait_for(state="visible", timeout=8000)
+        media.wait_for(state="visible", timeout=25000)
     except Exception:
-        alt = page.locator('[data-icon="wds-ic-send-filled"]')
-        if not alt.count():
-            print("No apareció Send 1 selected.")
-            return False
-        media = alt.first
+        print("No apareció Send 1 selected.")
+        return False
     page.wait_for_timeout(400)
     try:
         media.click(timeout=8000, force=True)
@@ -773,7 +554,7 @@ def enviar_imagen(page, ruta, pie=""):
             print("El preview sigue abierto; no envió.")
             return False
         page.wait_for_timeout(1500)
-    print("Imagen enviada (foto, no sticker).")
+    print("Imagen enviada.")
     return True
 
 
@@ -846,11 +627,6 @@ def main():
     ap.add_argument("--texto", default=None, help="Texto fijo; si omites, manda el resultado SQL")
     ap.add_argument("--prueba", action="store_true", help="Manda el texto de persistencia, sin SQL")
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
-    ap.add_argument(
-        "--excel-com",
-        action="store_true",
-        help="Probar captura literal Excel COM (por defecto usa Pillow estable)",
-    )
     args = ap.parse_args()
 
     _cargar_env()
@@ -864,7 +640,7 @@ def main():
             xlsx = armar_excel(cols, filas)
             print("Excel:")
             print(" ", xlsx)
-            imagen = captura_excel(xlsx, usar_com=args.excel_com)
+            imagen = captura_excel(xlsx)
         except Exception as e:
             print("No salió la consulta o la captura.")
             print(" ", str(e))
@@ -904,15 +680,10 @@ def main():
             return 2
         ok = esperar_sesion(page)
         if ok and not args.solo_abrir:
-            try:
-                if args.para:
-                    ok = enviar(page, args.para, texto)
-                else:
-                    ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
-            except Exception as e:
-                print("Falló el envío (Chrome sigue abierto).")
-                print(" ", str(e).split("\n")[0])
-                ok = False
+            if args.para:
+                ok = enviar(page, args.para, texto)
+            else:
+                ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
         print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
         try:
             input()
