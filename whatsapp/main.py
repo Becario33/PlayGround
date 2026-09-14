@@ -627,63 +627,95 @@ def enviar_imagen(page, ruta, pie=""):
         return False
     ruta_abs = os.path.abspath(ruta)
 
-    def _set_foto():
-        # Solo input de Fotos y videos (accept con video). Nunca el de stickers.
-        loc = page.locator('input[type="file"][accept*="video"]')
-        if not loc.count():
-            return False
-        try:
-            loc.last.set_input_files(ruta_abs)
-            return True
-        except Exception:
-            return False
-
-    if not _set_foto():
+    def _abrir_adjuntar():
         for sel in (
             'button[aria-label="Attach"]',
             'button[aria-label="Adjuntar"]',
             'span[data-icon="plus"]',
             'span[data-icon="attach-menu-plus"]',
             'div[title="Attach"]',
+            'div[title="Adjuntar"]',
         ):
             loc = page.locator(sel)
-            if loc.count():
+            if not loc.count():
+                continue
+            try:
+                loc.first.click(timeout=4000)
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _es_sticker(accept):
+        a = (accept or "").lower()
+        if "video" in a:
+            return False
+        # Stickers: casi siempre png/webp sin jpeg ni image/*
+        if "webp" in a and "png" in a and "jpeg" not in a and "jpg" not in a and "image/*" not in a:
+            return True
+        return False
+
+    def _set_foto():
+        n = page.locator('input[type="file"]').count()
+        # 1) Preferir Fotos y videos (accept con video)
+        for i in range(n):
+            el = page.locator('input[type="file"]').nth(i)
+            accept = el.get_attribute("accept") or ""
+            if "video" in accept.lower():
                 try:
-                    loc.first.click(timeout=5000)
+                    el.set_input_files(ruta_abs)
+                    return True
                 except Exception:
                     continue
-                page.wait_for_timeout(500)
-                break
-        if not _set_foto():
-            adjunto = False
-            for nombre in ("Photos & videos", "Fotos y videos", "Photos and videos"):
-                op = page.get_by_text(nombre, exact=False)
-                if not op.count():
-                    continue
+        # 2) Cualquier image/* / jpeg que no sea sticker
+        for i in range(n):
+            el = page.locator('input[type="file"]').nth(i)
+            accept = el.get_attribute("accept") or ""
+            if _es_sticker(accept):
+                continue
+            if "image" in accept.lower() or accept == "":
                 try:
-                    with page.expect_file_chooser(timeout=12000) as fc_info:
-                        op.first.click(timeout=5000, force=True)
-                    fc_info.value.set_files(ruta_abs)
-                    adjunto = True
-                    break
-                except Exception as e:
-                    print("No pude usar el diálogo de archivos.")
-                    print(" ", str(e).split("\n")[0])
-                    try:
-                        page.keyboard.press("Escape")
-                    except Exception:
-                        pass
-                    page.wait_for_timeout(300)
-            if not adjunto and not _set_foto():
-                print("No encontré Fotos y videos (evito stickers).")
-                return False
+                    el.set_input_files(ruta_abs)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    # Primero intenta sin abrir menú; si no, clip y espera inputs
+    if not _set_foto():
+        if not _abrir_adjuntar():
+            print("No encontré el botón Adjuntar.")
+            return False
+        print("Menú Adjuntar abierto; busco input de foto...")
+        listo = False
+        for _ in range(20):
+            page.wait_for_timeout(250)
+            if _set_foto():
+                listo = True
+                break
+        if not listo:
+            accepts = page.evaluate(
+                """() => [...document.querySelectorAll('input[type=file]')]
+                    .map(el => el.accept || '(vacío)')"""
+            )
+            print("No pude adjuntar la foto (sin Explorador).")
+            print("  inputs accept =", accepts)
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            return False
 
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
         media.wait_for(state="visible", timeout=25000)
     except Exception:
-        print("No apareció Send 1 selected.")
-        return False
+        # A veces el aria-label cambia; probar el avión
+        alt = page.locator('[data-icon="wds-ic-send-filled"]')
+        if not alt.count():
+            print("No apareció Send 1 selected.")
+            return False
+        media = alt.first
     page.wait_for_timeout(400)
     try:
         media.click(timeout=8000, force=True)
