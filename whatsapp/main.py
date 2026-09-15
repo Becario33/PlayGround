@@ -187,8 +187,8 @@ def _fijar_colores_copia(ws):
     from openpyxl.styles import PatternFill
 
     peach = PatternFill(fill_type="solid", fgColor=_FILL_EXCLUSIVA)
-    # Fila Exclusiva Cinemex (A13:N13 en la plantilla oficial)
-    for col in range(1, 15):
+    # Fila Exclusiva Cinemex completa A13:Q13 (incluye P y Q / Var % Sem Ant)
+    for col in range(1, 18):
         ws.cell(13, col).fill = peach
     # Año como texto: evita "2,025" por formato regional del servidor
     for coord in ("B17", "B21"):
@@ -252,15 +252,35 @@ def llenar_plantilla_top10(cols, filas):
 
 
 def _esperar_enter():
-    """Espera Enter / tecla aunque el stdin del servidor no sea interactivo."""
+    """
+    Espera confirmación antes de cerrar Chrome.
+    En servidor a menudo no hay stdin TTY: usa CON / MessageBox.
+    """
     print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
+    sys.stdout.flush()
+
+    # 1) Consola normal
     try:
-        if sys.stdin is not None and sys.stdin.isatty():
+        if sys.stdin is not None and getattr(sys.stdin, "isatty", lambda: False)():
             input()
             return
     except EOFError:
         pass
+
     if sys.platform == "win32":
+        # 2) Consola Windows (CON) aunque stdin venga redirigido
+        try:
+            con = open("CONIN$", "r", encoding="utf-8", errors="ignore")
+            try:
+                print("Esperando Enter en la consola…")
+                sys.stdout.flush()
+                con.readline()
+                return
+            finally:
+                con.close()
+        except Exception:
+            pass
+        # 3) Tecla vía msvcrt
         try:
             import msvcrt
 
@@ -270,7 +290,24 @@ def _esperar_enter():
             return
         except Exception:
             pass
-    print("(sin teclado: espero 60 s)")
+        # 4) Cuadro de diálogo (sesión de escritorio / RDP en servidor)
+        try:
+            import ctypes
+
+            print("Esperando OK en el cuadro de diálogo…")
+            sys.stdout.flush()
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                "Cierra Chrome cuando termines y pulsa OK para continuar.",
+                "PlayGround WhatsApp",
+                0x00000040,  # MB_ICONINFORMATION
+            )
+            return
+        except Exception:
+            pass
+
+    print("(sin teclado ni diálogo: espero 60 s)")
+    sys.stdout.flush()
     time.sleep(60)
 
 
