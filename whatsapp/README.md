@@ -75,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.14** — Input real `image/*` en footer (probado en WhatsApp Web)
 - **v1.4.13** — Foto vía `input[type=file]` accept=video (no depende del clic)
 - **v1.4.12** — Espera aria-expanded + clic JS a Photos & videos
 - **v1.4.11** — Menú: clic a `menuitem` Photos & videos del HTML
