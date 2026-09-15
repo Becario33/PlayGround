@@ -520,6 +520,8 @@ def _js_clic_enviar_media(page):
     return page.evaluate(
         """() => {
             const el = document.querySelector('div[role="button"][aria-label="Send 1 selected"]')
+                || document.querySelector('div[role="button"][aria-label="Send"]')
+                || document.querySelector('div[role="button"][aria-label="Enviar"]')
                 || document.querySelector('[data-icon="wds-ic-send-filled"]')?.closest('[role="button"]');
             if (!el) return false;
             el.click();
@@ -528,178 +530,264 @@ def _js_clic_enviar_media(page):
     )
 
 
+def _hay_preview_media(page):
+    for sel in (
+        'div[role="button"][aria-label="Send 1 selected"]',
+        'div[role="button"][aria-label="Send"]',
+        'div[role="button"][aria-label="Enviar"]',
+    ):
+        if page.locator(sel).count():
+            return True
+    return False
+
+
+def _mantener_seleccion(page):
+    txt = page.evaluate(
+        """() => (document.body && document.body.innerText || '').toLowerCase()"""
+    )
+    if not (
+        "discard selection" in txt
+        or "descartar selección" in txt
+        or "descartar seleccion" in txt
+    ):
+        return False
+    print("  diálogo Discard → Cancel")
+    for sel in (
+        'button:has-text("Cancel")',
+        'button:has-text("Cancelar")',
+        'div[role="button"]:has-text("Cancel")',
+        'div[role="button"]:has-text("Cancelar")',
+    ):
+        loc = page.locator(sel)
+        if loc.count():
+            try:
+                loc.first.click(timeout=3000)
+                page.wait_for_timeout(400)
+                return True
+            except Exception:
+                pass
+    return False
+
+
+def _abrir_clip(page):
+    btn = page.locator('button[aria-label="Attach"], button[aria-label="Adjuntar"]')
+    if not btn.count():
+        return False
+    try:
+        if btn.first.get_attribute("aria-expanded") == "true":
+            return True
+        btn.first.click(timeout=8000)
+    except Exception:
+        return False
+    for _ in range(20):
+        if btn.first.get_attribute("aria-expanded") == "true":
+            return True
+        if page.locator('button[role="menuitem"]').count():
+            return True
+        page.wait_for_timeout(200)
+    return True
+
+
+def _pulsar_enviar_media(page):
+    _mantener_seleccion(page)
+    media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
+    if media.count() == 0:
+        media = page.locator(
+            'div[role="button"][aria-label="Send"], '
+            'div[role="button"][aria-label="Enviar"]'
+        )
+    try:
+        if media.count():
+            media.last.click(timeout=10000, force=True)
+        elif not _js_clic_enviar_media(page):
+            return False
+    except Exception:
+        if not _js_clic_enviar_media(page):
+            return False
+    page.wait_for_timeout(2000)
+    _mantener_seleccion(page)
+    if _hay_preview_media(page):
+        if not _js_clic_enviar_media(page):
+            return False
+        page.wait_for_timeout(1500)
+    return True
+
+
+def _adjuntar_pegando(page, ruta_abs):
+    """
+    Pegar el JPEG en la caja del chat. WhatsApp lo trata como foto
+    (no usa el input de sticker / image/* del clip).
+    """
+    caja = _caja_mensaje(page)
+    if caja is None:
+        print("  paste: no hay caja de mensaje")
+        return False
+    try:
+        caja.click(timeout=8000)
+    except Exception:
+        return False
+    page.wait_for_timeout(200)
+    with open(ruta_abs, "rb") as f:
+        b64 = __import__("base64").b64encode(f.read()).decode("ascii")
+    nombre = os.path.basename(ruta_abs)
+    ok = page.evaluate(
+        """async ({ b64, nombre }) => {
+            const caja = document.querySelector('#main footer [contenteditable="true"]')
+                || document.querySelector('footer [contenteditable="true"]');
+            if (!caja) return false;
+            const bin = atob(b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const file = new File([bytes], nombre, { type: 'image/jpeg' });
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            caja.focus();
+            const ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+            // Chromium a veces ignora clipboardData del constructor; forzar DataTransfer
+            try {
+                Object.defineProperty(ev, 'clipboardData', { get: () => dt });
+            } catch (e) {}
+            caja.dispatchEvent(ev);
+            return true;
+        }""",
+        {"b64": b64, "nombre": nombre},
+    )
+    if not ok:
+        print("  paste: evaluate falló")
+        return False
+    print("  paste JPEG en caja de mensaje")
+    for _ in range(32):
+        page.wait_for_timeout(250)
+        _mantener_seleccion(page)
+        if _hay_preview_media(page):
+            print("  Preview OK tras paste.")
+            return True
+    print("  paste: no abrió preview")
+    return False
+
+
+def _descartar_preview(page):
+    """Cierra un preview a medias antes de otro intento."""
+    if not _hay_preview_media(page) and not page.evaluate(
+        """() => {
+            const t = (document.body && document.body.innerText || '').toLowerCase();
+            return t.includes('discard selection') || t.includes('descartar');
+        }"""
+    ):
+        return
+    print("  cierro preview anterior...")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(500)
+    for sel in (
+        'button:has-text("Discard")',
+        'button:has-text("Descartar")',
+        'div[role="button"]:has-text("Discard")',
+        'div[role="button"]:has-text("Descartar")',
+    ):
+        loc = page.locator(sel)
+        if loc.count():
+            try:
+                loc.last.click(timeout=3000)
+                page.wait_for_timeout(500)
+                break
+            except Exception:
+                pass
+    page.wait_for_timeout(400)
+
+
+def _adjuntar_documento(page, ruta_abs):
+    """Document: WhatsApp NUNCA lo convierte en sticker."""
+    if not _abrir_clip(page):
+        print("  document: no abrí Attach")
+        return False
+    page.wait_for_timeout(400)
+    doc = page.locator(
+        'button[role="menuitem"][aria-label*="Document"], '
+        'button[role="menuitem"][aria-label*="Documento"]'
+    )
+    if not doc.count():
+        print("  document: no vi menuitem Document")
+        return False
+    with open(ruta_abs, "rb") as f:
+        raw = f.read()
+    payload = {
+        "name": os.path.basename(ruta_abs),
+        "mimeType": "image/jpeg",
+        "buffer": raw,
+    }
+    try:
+        with page.expect_file_chooser(timeout=6000) as fc_info:
+            doc.first.click(timeout=8000)
+        fc_info.value.set_files(payload)
+        print("  Document + file_chooser OK")
+    except Exception as e:
+        print("  document file_chooser:", str(e).split("\n")[0])
+        infos = page.evaluate(
+            """() => [...document.querySelectorAll('input[type="file"]')].map((el, i) => ({
+                i, accept: el.accept || '', multiple: !!el.multiple
+            }))"""
+        )
+        print("  inputs:", infos)
+        puesto = False
+        for info in infos:
+            a = (info.get("accept") or "").lower().strip()
+            # Solo input de documentos (*), nunca image/* ni png/webp
+            if "webp" in a and "png" in a:
+                continue
+            if a in ("image/*",) or a.startswith("image/*"):
+                continue
+            if a in ("", "*", "*/*") or a.startswith("*") or (
+                info.get("multiple") and "image" not in a
+            ):
+                try:
+                    page.locator('input[type="file"]').nth(info["i"]).set_input_files(payload)
+                    print(f"  set_input_files DOC input[{info['i']}] accept={a[:40]!r}")
+                    puesto = True
+                    break
+                except Exception as e2:
+                    print(f"  input[{info['i']}]:", str(e2).split("\n")[0])
+        if not puesto:
+            return False
+    for _ in range(32):
+        page.wait_for_timeout(250)
+        _mantener_seleccion(page)
+        if _hay_preview_media(page):
+            print("  Preview OK (documento).")
+            return True
+    return False
+
+
 def enviar_imagen(page, ruta, pie=""):
     """
-    Foto (no sticker): JPEG 1280×720 + input accept=image/* (o Photos & videos).
-    Nunca Escape con preview abierto: WhatsApp muestra "Discard selection?" y se traba.
+    Por qué salía sticker: el input footer accept=image/* en WA actual a veces
+    entra al pipeline de sticker aunque el preview se vea como foto.
+
+    Orden:
+      1) Pegar JPEG en la caja → foto real
+      2) Si no, Attach → Document → nunca sticker (archivo con preview)
     """
     if not os.path.isfile(ruta):
         print("No está el JPEG de la captura.")
         return False
     ruta_abs = os.path.abspath(ruta)
 
-    def _hay_preview():
-        return page.locator('div[role="button"][aria-label="Send 1 selected"]').count() > 0
-
-    def _hay_discard():
-        txt = page.evaluate(
-            """() => (document.body && document.body.innerText || '').toLowerCase()"""
-        )
-        return "discard selection" in txt or "descartar selección" in txt or "descartar seleccion" in txt
-
-    def _mantener_seleccion():
-        """Si salió Discard selection?, Cancel = conservar la foto."""
-        if not _hay_discard():
-            return False
-        print("  diálogo Discard selection? → Cancel")
-        for sel in (
-            'button:has-text("Cancel")',
-            'button:has-text("Cancelar")',
-            'div[role="button"]:has-text("Cancel")',
-            'div[role="button"]:has-text("Cancelar")',
-        ):
-            loc = page.locator(sel)
-            if loc.count():
-                try:
-                    loc.first.click(timeout=3000)
-                    page.wait_for_timeout(400)
-                    return True
-                except Exception:
-                    pass
-        # No Escape: en este diálogo Escape a veces confirma Discard
-        print("  no pude pulsar Cancel del Discard")
-        return False
-
-    def _es_sticker_accept(accept):
-        a = (accept or "").lower()
-        if "video" in a or "image/*" in a or "jpeg" in a or "jpg" in a:
-            return False
-        return "webp" in a and "png" in a
-
-    def _set_foto_input():
-        infos = page.evaluate(
-            """() => [...document.querySelectorAll('input[type="file"]')].map((el, i) => ({
-                i, accept: el.accept || ''
-            }))"""
-        )
-        print("  inputs:", infos)
-
-        def score(info):
-            a = (info.get("accept") or "").lower()
-            if _es_sticker_accept(a):
-                return 99
-            if a.strip() == "image/*" or a.startswith("image/*"):
-                return 0
-            if "video" in a:
-                return 1
-            if "image" in a:
-                return 2
-            return 50
-
-        for info in sorted(infos, key=score):
-            a = (info.get("accept") or "").lower()
-            if _es_sticker_accept(a):
-                print(f"  salto sticker input[{info['i']}]")
-                continue
-            if "image" not in a and "video" not in a and a != "":
-                continue
-            try:
-                page.locator('input[type="file"]').nth(info["i"]).set_input_files(ruta_abs)
-                print(f"  set_input_files OK input[{info['i']}] accept={a[:60]!r}")
-                for _ in range(24):
-                    page.wait_for_timeout(250)
-                    _mantener_seleccion()
-                    if _hay_preview():
-                        print("  Preview OK (Send 1 selected).")
-                        return True
-                print("  sin preview aún; pruebo otro input...")
-            except Exception as e:
-                print(f"  input[{info['i']}] falló:", str(e).split("\n")[0])
-        return False
-
-    def _abrir_clip():
-        btn = page.locator('button[aria-label="Attach"], button[aria-label="Adjuntar"]')
-        if not btn.count():
-            return False
-        try:
-            if btn.first.get_attribute("aria-expanded") == "true":
-                return True
-            btn.first.click(timeout=8000)
-        except Exception:
-            return False
-        for _ in range(20):
-            if btn.first.get_attribute("aria-expanded") == "true":
-                return True
-            if page.locator('button[role="menuitem"][aria-label*="Photos"]').count():
-                return True
-            page.wait_for_timeout(200)
-        return True
-
-    def _adjuntar_por_photos():
-        if _hay_preview():
+    print("Intento 1: pegar imagen en el chat (foto)...")
+    if _adjuntar_pegando(page, ruta_abs):
+        if _pulsar_enviar_media(page):
+            print("Imagen enviada (foto por paste).")
             return True
-        if not _abrir_clip():
-            return False
-        page.wait_for_timeout(400)
-        photos = page.locator(
-            'button[role="menuitem"][aria-label*="Photos"], '
-            'button[role="menuitem"][aria-label*="Fotos"]'
-        )
-        if not photos.count():
-            print("  no vi menuitem Photos & videos")
-            return False
-        try:
-            with page.expect_file_chooser(timeout=5000) as fc_info:
-                photos.first.click(timeout=8000)
-            fc_info.value.set_files(ruta_abs)
-            print("  Photos & videos + file_chooser OK")
-        except Exception as e:
-            print("  file_chooser no salió:", str(e).split("\n")[0])
-            return _set_foto_input()
-        for _ in range(28):
-            page.wait_for_timeout(250)
-            _mantener_seleccion()
-            if _hay_preview():
-                print("  Preview OK tras Photos.")
-                return True
-        return False
+        print("  paste abrió preview pero no envió.")
+    _descartar_preview(page)
 
-    # 1) Input footer (rápido). 2) Si no, Photos & videos.
-    print("Adjunto: input footer image/*...")
-    ok = _set_foto_input()
-    if not ok:
-        print("Pruebo Photos & videos...")
-        ok = _adjuntar_por_photos()
-    if not ok:
-        print("No pude adjuntar la foto.")
-        return False
+    print("Intento 2: Document (garantiza que NO sea sticker)...")
+    if _adjuntar_documento(page, ruta_abs):
+        if _pulsar_enviar_media(page):
+            print("Imagen enviada como documento (no sticker).")
+            return True
+        print("  documento en preview pero no envió.")
 
-    _mantener_seleccion()
-    media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
-    try:
-        media.wait_for(state="visible", timeout=25000)
-    except Exception:
-        _mantener_seleccion()
-        if not _hay_preview():
-            print("No apareció Send 1 selected.")
-            return False
-    page.wait_for_timeout(500)
-    _mantener_seleccion()
-    try:
-        media.click(timeout=10000, force=True)
-    except Exception:
-        if not _js_clic_enviar_media(page):
-            print("No pude pulsar Send 1 selected.")
-            return False
-    page.wait_for_timeout(2000)
-    _mantener_seleccion()
-    if page.locator('div[role="button"][aria-label="Send 1 selected"]').count():
-        if not _js_clic_enviar_media(page):
-            print("El preview sigue abierto; no envió.")
-            return False
-        page.wait_for_timeout(1500)
-    print("Imagen enviada (foto).")
-    return True
+    print("No pude enviar la imagen.")
+    return False
 
 
 def escribir_y_enviar(page, texto):
