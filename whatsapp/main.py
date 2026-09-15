@@ -177,11 +177,32 @@ def excel_en_layout():
     return plantilla_oficial()
 
 
+# Accent 2 Lighter 80% (Office default) — evita franja negra si el servidor
+# tiene otro tema de Excel (la plantilla usa theme=5, no RGB fijo).
+_FILL_EXCLUSIVA = "FCE4D6"
+
+
+def _fijar_colores_copia(ws):
+    """En la copia: rellenos RGB fijos para que la captura COM se vea igual en cualquier PC."""
+    from openpyxl.styles import PatternFill
+
+    peach = PatternFill(fill_type="solid", fgColor=_FILL_EXCLUSIVA)
+    # Fila Exclusiva Cinemex (A13:N13 en la plantilla oficial)
+    for col in range(1, 15):
+        ws.cell(13, col).fill = peach
+    # Año como texto: evita "2,025" por formato regional del servidor
+    for coord in ("B17", "B21"):
+        cel = ws[coord]
+        if cel.value is not None and not isinstance(cel.value, str):
+            cel.value = str(int(cel.value)) if isinstance(cel.value, (int, float)) else str(cel.value)
+            cel.number_format = "@"
+
+
 def llenar_plantilla_top10(cols, filas):
     """
     Copia Plantilla.xlsx a resultados/ y escribe solo .value
     (como tecleo humano): B=Película, C=Asistencia, D=Taquilla, Total C15/D15.
-    No toca font, fill, number_format ni formato condicional.
+    Fija el peach de Exclusiva en RGB para no depender del tema de Office.
     """
     from openpyxl import load_workbook
 
@@ -198,6 +219,7 @@ def llenar_plantilla_top10(cols, filas):
 
     wb = load_workbook(destino)
     ws = wb.active
+    _fijar_colores_copia(ws)
 
     total_asist = 0
     total_taq = 0
@@ -227,6 +249,29 @@ def llenar_plantilla_top10(cols, filas):
     print("Copia con datos (Plantilla intacta):")
     print(" ", destino)
     return destino
+
+
+def _esperar_enter():
+    """Espera Enter / tecla aunque el stdin del servidor no sea interactivo."""
+    print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            input()
+            return
+    except EOFError:
+        pass
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+
+            print("Pulsa una tecla para cerrar Chrome…")
+            sys.stdout.flush()
+            msvcrt.getch()
+            return
+        except Exception:
+            pass
+    print("(sin teclado: espero 60 s)")
+    time.sleep(60)
 
 
 def _fmt_celda_excel(valor, num_fmt):
@@ -1664,11 +1709,7 @@ def main():
                 print("Falló el envío (Chrome sigue abierto).")
                 print(" ", str(e).split("\n")[0])
                 ok = False
-        print("Cierra la ventana de Chrome cuando termines (o Enter aquí).")
-        try:
-            input()
-        except EOFError:
-            page.wait_for_timeout(8000)
+        _esperar_enter()
         ctx.close()
     return 0 if ok else 2
 
