@@ -121,6 +121,145 @@ def _etiqueta_antier():
     return (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
 
 
+# Encabezados exactos del layout (AY–BK). Multilínea = \n como en la hoja.
+ENCABEZADOS_LAYOUT_FS = (
+    "Rank",
+    "Película",
+    "Asistencia Nacional",
+    "Taquilla Nacional",
+    "MS CNMX\nAsistencia",
+    "MS SA CNMX\nAsistencia",
+    "Dif SA",
+    "MS CNMX\nTaquilla",
+    "MS SA Cnmx\nTaquilla",
+    "Dif SA",
+    "PPB CNMX",
+    "PPB SA",
+    "Dif SA",
+)
+FILAS_DATOS_LAYOUT = 10  # Rank 1–10 en blanco
+
+
+def captura_layout_vacio():
+    """
+    Imagen del layout vacío (solo encabezados), estilo hoja FS.
+    Sin SQL ni números. Para validar el diseño en WhatsApp.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    escala = 2
+    pad_x, pad_y = 8 * escala, 6 * escala
+    # Anchos relativos (Película más ancha, como en la captura)
+    anchos_base = [56, 220, 110, 110, 88, 100, 64, 88, 100, 64, 80, 72, 64]
+    anchos = [w * escala for w in anchos_base]
+    headers = list(ENCABEZADOS_LAYOUT_FS)
+
+    def _fuente(size, bold=False):
+        candidatos = (
+            ("arialbd.ttf" if bold else "arial.ttf"),
+            ("Arial Bold.ttf" if bold else "Arial.ttf"),
+            ("/Windows/Fonts/arialbd.ttf" if bold else "/Windows/Fonts/arial.ttf"),
+            (
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+                if bold
+                else "/System/Library/Fonts/Supplemental/Arial.ttf"
+            ),
+        )
+        for ruta in candidatos:
+            try:
+                return ImageFont.truetype(ruta, size * escala)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    font_h = _fuente(10, bold=True)
+    font_cell = _fuente(10, bold=False)
+    medidor = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+
+    def _alto_texto(txt, fnt):
+        lineas = (txt or " ").split("\n")
+        h = 0
+        for ln in lineas:
+            b = medidor.textbbox((0, 0), ln or " ", font=fnt)
+            h += int(b[3] - b[1]) + 2 * escala
+        return max(h, int(12 * escala))
+
+    def _ancho_texto(txt, fnt):
+        mx = 1
+        for ln in (txt or " ").split("\n"):
+            b = medidor.textbbox((0, 0), ln or " ", font=fnt)
+            mx = max(mx, int(b[2] - b[0]))
+        return mx
+
+    # Ajustar anchos si el encabezado necesita más espacio
+    for i, h in enumerate(headers):
+        need = _ancho_texto(h, font_h) + pad_x * 2
+        if need > anchos[i]:
+            anchos[i] = need
+
+    alto_header = max(_alto_texto(h, font_h) for h in headers) + pad_y * 2
+    alto_fila = int(22 * escala) + pad_y
+    # header + 10 filas + 1 vacía + 1 total (en blanco)
+    n_filas_cuerpo = FILAS_DATOS_LAYOUT + 2
+    w = sum(anchos) + 2
+    h = alto_header + alto_fila * n_filas_cuerpo + 2
+
+    img = Image.new("RGB", (w, h), "white")
+    draw = ImageDraw.Draw(img)
+    gris_header = "#E7E6E6"
+    gris_linea = "#808080"
+    texto_header = "#404040"
+
+    # Encabezado
+    draw.rectangle([0, 0, w - 1, alto_header - 1], fill=gris_header)
+    x = 0
+    for i, titulo in enumerate(headers):
+        aw = anchos[i]
+        # Texto centrado (Rank/Película un poco a la izquierda como en hoja)
+        lineas = titulo.split("\n")
+        th = _alto_texto(titulo, font_h)
+        y0 = (alto_header - th) // 2
+        for ln in lineas:
+            tw = _ancho_texto(ln, font_h)
+            if i <= 1:
+                tx = x + pad_x
+            else:
+                tx = x + (aw - tw) // 2
+            draw.text((tx, y0), ln, font=font_h, fill=texto_header)
+            y0 += _alto_texto(ln, font_h)
+        x += aw
+
+    # Línea punteada bajo encabezado (como en la imagen)
+    y = alto_header
+    paso = 4 * escala
+    for px in range(0, w, paso * 2):
+        draw.line([(px, y), (min(px + paso, w - 1), y)], fill="black", width=max(1, escala // 2))
+
+    # Filas vacías + rejilla
+    for r in range(n_filas_cuerpo):
+        y1 = alto_header + r * alto_fila
+        y2 = y1 + alto_fila
+        # línea horizontal punteada
+        for px in range(0, w, paso * 2):
+            draw.line(
+                [(px, y2), (min(px + paso, w - 1), y2)],
+                fill=gris_linea,
+                width=max(1, escala // 2),
+            )
+        # Rank vacío deja el hueco visual; no escribimos números ni Total
+        _ = font_cell  # tipografía lista para cuando metamos datos
+
+    # Borde exterior
+    draw.rectangle([0, 0, w - 1, h - 1], outline="#B0B0B0")
+
+    ruta = os.path.join(_dir_resultados(), "layout_fs_vacio.jpg")
+    img.save(ruta, format="JPEG", quality=95, optimize=True)
+    print("Layout vacío (solo encabezados):")
+    print(" ", ruta)
+    print(" ", img.size[0], "x", img.size[1])
+    return ruta
+
+
 def armar_excel(cols, filas):
     from datetime import datetime
     from openpyxl import Workbook
@@ -862,6 +1001,11 @@ def main():
     ap.add_argument("--para", default="", help="Número destino con lada país, sin + (opcional)")
     ap.add_argument("--texto", default=None, help="Texto fijo; si omites, manda el resultado SQL")
     ap.add_argument("--prueba", action="store_true", help="Manda el texto de persistencia, sin SQL")
+    ap.add_argument(
+        "--top10",
+        action="store_true",
+        help="En esta rama: manda el Top 10 antier (flujo estable). Por defecto: layout vacío.",
+    )
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
     args = ap.parse_args()
 
@@ -872,18 +1016,28 @@ def main():
         texto = TEXTO_DEFAULT
     elif texto is None and not args.solo_abrir:
         try:
-            texto, cols, filas = consulta_asistencia()
-            xlsx = armar_excel(cols, filas)
-            print("Excel:")
-            print(" ", xlsx)
-            imagen = captura_excel(xlsx)
+            if args.top10:
+                texto, cols, filas = consulta_asistencia()
+                xlsx = armar_excel(cols, filas)
+                print("Excel:")
+                print(" ", xlsx)
+                imagen = captura_excel(xlsx)
+            else:
+                # Rama prueba/layout-fs37: solo layout (sin query)
+                print("Modo layout vacío (rama de pruebas, sin SQL).")
+                imagen = captura_layout_vacio()
+                texto = "(layout vacío — solo encabezados)"
         except Exception as e:
             print("No salió la consulta o la captura.")
             print(" ", str(e))
             return 1
-        print("Resultado SQL:")
-        print(texto)
-        print()
+        if args.top10:
+            print("Resultado SQL:")
+            print(texto)
+            print()
+        else:
+            print("Se mandará solo la imagen del layout.")
+            print()
 
     try:
         from playwright.sync_api import sync_playwright

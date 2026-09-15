@@ -4,6 +4,22 @@ Top 10 películas por taquilla Comscore (antier) en SQL Server: se arma un Excel
 
 En cada PC nueva hay que escanear el QR. Esa carpeta y el `.env` no se suben a GitHub. La base `10.55.55.134` solo responde **en el corporativo**.
 
+
+## Rama de pruebas `prueba/layout-fs37`
+
+Por defecto **no** corre SQL: manda a WhatsApp la imagen del **layout vacío** (solo encabezados AY–BK).
+
+```bat
+git checkout prueba/layout-fs37
+git pull
+cd whatsapp
+python main.py
+```
+
+Top 10 estable (antier) en esta rama: `python main.py --top10`
+
+Master/`v1.6.2` sigue intacto con el Top 10.
+
 ## Requisitos
 
 - Python 3.9+
