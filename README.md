@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.13** — Adjunta por input oculto (video); clic Photos ya no es la vía principal
 - **v1.4.12** — Attach expanded + clic JS fuerte a Photos & videos
 - **v1.4.11** — Clic fijo a menuitem Photos & videos (HTML); sin Escape del chat
 - **v1.4.10** — Photos & videos por aria-label; JPEG ≥1280×720; esperas lentas
