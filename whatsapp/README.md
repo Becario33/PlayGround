@@ -75,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.16** — Cancel en Discard; ya no Escape con preview
 - **v1.4.15** — Lienzo 1280×720 + clic Photos & videos (anti-sticker)
 - **v1.4.14** — Input real `image/*` en footer (probado en WhatsApp Web)
 - **v1.4.13** — Foto vía `input[type=file]` accept=video (no depende del clic)

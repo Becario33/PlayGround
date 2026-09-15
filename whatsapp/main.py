@@ -530,10 +530,8 @@ def _js_clic_enviar_media(page):
 
 def enviar_imagen(page, ruta, pie=""):
     """
-    Foto (no sticker):
-      1) Attach → clic en Photos & videos (nunca New sticker).
-      2) Si el file chooser no aparece, set_input_files en accept=image/* del footer.
-      3) Abortar si el UI es el de sticker.
+    Foto (no sticker): JPEG 1280×720 + input accept=image/* (o Photos & videos).
+    Nunca Escape con preview abierto: WhatsApp muestra "Discard selection?" y se traba.
     """
     if not os.path.isfile(ruta):
         print("No está el JPEG de la captura.")
@@ -543,18 +541,34 @@ def enviar_imagen(page, ruta, pie=""):
     def _hay_preview():
         return page.locator('div[role="button"][aria-label="Send 1 selected"]').count() > 0
 
-    def _es_ui_sticker():
-        return page.evaluate(
-            """() => {
-                const labels = [...document.querySelectorAll('[aria-label]')]
-                    .map(el => (el.getAttribute('aria-label') || '').toLowerCase());
-                const texto = (document.body && document.body.innerText || '').toLowerCase();
-                if (labels.some(a => a.includes('new sticker') || a === 'sticker')) return true;
-                if (texto.includes('drag to rearrange') && texto.includes('sticker')) return true;
-                if (document.querySelector('canvas') && texto.includes('add sticker')) return true;
-                return false;
-            }"""
+    def _hay_discard():
+        txt = page.evaluate(
+            """() => (document.body && document.body.innerText || '').toLowerCase()"""
         )
+        return "discard selection" in txt or "descartar selección" in txt or "descartar seleccion" in txt
+
+    def _mantener_seleccion():
+        """Si salió Discard selection?, Cancel = conservar la foto."""
+        if not _hay_discard():
+            return False
+        print("  diálogo Discard selection? → Cancel")
+        for sel in (
+            'button:has-text("Cancel")',
+            'button:has-text("Cancelar")',
+            'div[role="button"]:has-text("Cancel")',
+            'div[role="button"]:has-text("Cancelar")',
+        ):
+            loc = page.locator(sel)
+            if loc.count():
+                try:
+                    loc.first.click(timeout=3000)
+                    page.wait_for_timeout(400)
+                    return True
+                except Exception:
+                    pass
+        # No Escape: en este diálogo Escape a veces confirma Discard
+        print("  no pude pulsar Cancel del Discard")
+        return False
 
     def _es_sticker_accept(accept):
         a = (accept or "").lower()
@@ -594,6 +608,7 @@ def enviar_imagen(page, ruta, pie=""):
                 print(f"  set_input_files OK input[{info['i']}] accept={a[:60]!r}")
                 for _ in range(24):
                     page.wait_for_timeout(250)
+                    _mantener_seleccion()
                     if _hay_preview():
                         print("  Preview OK (Send 1 selected).")
                         return True
@@ -621,7 +636,8 @@ def enviar_imagen(page, ruta, pie=""):
         return True
 
     def _adjuntar_por_photos():
-        """Clic en Photos & videos + file chooser = ruta explícita de foto."""
+        if _hay_preview():
+            return True
         if not _abrir_clip():
             return False
         page.wait_for_timeout(400)
@@ -635,42 +651,40 @@ def enviar_imagen(page, ruta, pie=""):
         try:
             with page.expect_file_chooser(timeout=5000) as fc_info:
                 photos.first.click(timeout=8000)
-            chooser = fc_info.value
-            chooser.set_files(ruta_abs)
+            fc_info.value.set_files(ruta_abs)
             print("  Photos & videos + file_chooser OK")
         except Exception as e:
             print("  file_chooser no salió:", str(e).split("\n")[0])
-            # A veces el clic no abre chooser; el input ya quedó listo
-            if not _set_foto_input():
-                return False
+            return _set_foto_input()
         for _ in range(28):
             page.wait_for_timeout(250)
+            _mantener_seleccion()
             if _hay_preview():
                 print("  Preview OK tras Photos.")
                 return True
         return False
 
-    print("Adjunto: Photos & videos (foto, no sticker)...")
-    ok = _adjuntar_por_photos()
+    # 1) Input footer (rápido). 2) Si no, Photos & videos.
+    print("Adjunto: input footer image/*...")
+    ok = _set_foto_input()
     if not ok:
-        print("Fallback: input footer image/*...")
-        if not _set_foto_input():
-            print("No pude adjuntar la foto.")
-            return False
-
-    if _es_ui_sticker():
-        print("UI de sticker detectada; cancelo (no envío sticker).")
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(400)
+        print("Pruebo Photos & videos...")
+        ok = _adjuntar_por_photos()
+    if not ok:
+        print("No pude adjuntar la foto.")
         return False
 
+    _mantener_seleccion()
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:
         media.wait_for(state="visible", timeout=25000)
     except Exception:
-        print("No apareció Send 1 selected.")
-        return False
+        _mantener_seleccion()
+        if not _hay_preview():
+            print("No apareció Send 1 selected.")
+            return False
     page.wait_for_timeout(500)
+    _mantener_seleccion()
     try:
         media.click(timeout=10000, force=True)
     except Exception:
@@ -678,6 +692,7 @@ def enviar_imagen(page, ruta, pie=""):
             print("No pude pulsar Send 1 selected.")
             return False
     page.wait_for_timeout(2000)
+    _mantener_seleccion()
     if page.locator('div[role="button"][aria-label="Send 1 selected"]').count():
         if not _js_clic_enviar_media(page):
             print("El preview sigue abierto; no envió.")
