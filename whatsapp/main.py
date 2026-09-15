@@ -519,129 +519,148 @@ def _js_clic_enviar_media(page):
 
 def enviar_imagen(page, ruta, pie=""):
     """
-    Flujo fijo según HTML del menú:
-      Attach → button[role=menuitem][aria-label="Photos & videos"] → inyectar JPEG → Send
-      Nunca New sticker.
+    Attach (aria-expanded=true) → menuitem Photos & videos → inyectar JPEG.
+    Nunca New sticker. No Escape (no cierra el chat).
     """
     if not os.path.isfile(ruta):
         print("No está el JPEG de la captura.")
         return False
     ruta_abs = os.path.abspath(ruta)
 
+    def _attach_btn():
+        loc = page.locator('button[aria-label="Attach"], button[aria-label="Adjuntar"]')
+        return loc.first if loc.count() else None
+
     def _abrir_clip():
-        btn = page.locator('button[aria-label="Attach"], button[aria-label="Adjuntar"]')
-        if btn.count():
-            try:
-                btn.first.click(timeout=8000)
-                return True
-            except Exception:
-                pass
-        icon = page.locator('[data-testid="ic-attach-file"], span[data-icon="ic-attach-file"]')
-        if icon.count():
+        btn = _attach_btn()
+        if btn is None:
+            icon = page.locator(
+                '[data-testid="ic-attach-file"], span[data-icon="ic-attach-file"]'
+            )
+            if not icon.count():
+                return False
             try:
                 icon.first.click(timeout=8000)
-                return True
             except Exception:
-                pass
+                return False
+        else:
+            try:
+                # Si ya está abierto, no togglear (cerraría el menú)
+                exp = btn.get_attribute("aria-expanded")
+                if exp == "true":
+                    print("  Menú Attach ya abierto.")
+                    return True
+                btn.click(timeout=8000)
+            except Exception:
+                return False
+        # Esperar aria-expanded=true (menú montado)
+        for _ in range(40):
+            b = _attach_btn()
+            if b is not None:
+                try:
+                    if b.get_attribute("aria-expanded") == "true":
+                        print("  Attach aria-expanded=true")
+                        return True
+                except Exception:
+                    pass
+            # También vale si ya hay Photos & videos en el DOM
+            if page.locator('button[role="menuitem"][aria-label*="Photos"]').count():
+                print("  Menuitem Photos visible en DOM")
+                return True
+            if page.locator('button[role="menuitem"][aria-label*="Fotos"]').count():
+                return True
+            page.wait_for_timeout(250)
+        print("  Attach no quedó expanded.")
         return False
 
-    def _esperar_menu():
-        try:
-            page.locator('[role="menu"]').first.wait_for(state="visible", timeout=15000)
-            return True
-        except Exception:
-            return False
-
-    def _clic_photos_videos():
-        """Clic explícito al menuitem del HTML que mandaste."""
-        # 1) Playwright role + name (aria-label decodificado: Photos & videos)
-        try:
-            op = page.get_by_role("menuitem", name="Photos & videos")
-            if op.count():
-                print("  Clic menuitem: Photos & videos")
-                op.first.click(timeout=8000, force=True)
-                return True
-        except Exception as e:
-            print("  get_by_role falló:", str(e).split("\n")[0])
-
-        # 2) Selector CSS exacto del HTML
-        for sel in (
-            'button[role="menuitem"][aria-label="Photos & videos"]',
-            'button[role="menuitem"][aria-label="Fotos y videos"]',
-        ):
-            loc = page.locator(sel)
-            if loc.count():
-                print("  Clic selector:", sel)
-                try:
-                    loc.first.click(timeout=8000, force=True)
-                    return True
-                except Exception:
-                    continue
-
-        # 3) JS: buscar por aria-label que contenga Photos + video (nunca sticker)
-        ok = page.evaluate(
-            """() => {
-                const items = [...document.querySelectorAll('button[role="menuitem"]')];
-                const btn = items.find(el => {
-                    const a = (el.getAttribute('aria-label') || '').toLowerCase();
-                    if (a.includes('sticker')) return false;
-                    return (a.includes('photos') && a.includes('video'))
-                        || (a.includes('fotos') && a.includes('video'));
-                });
-                if (!btn) return false;
-                btn.click();
-                return true;
-            }"""
-        )
-        if ok:
-            print("  Clic JS en Photos & videos (aria-label del HTML).")
-            return True
+    def _inyectar_jpeg():
+        """Clic JS fuerte a Photos & videos + file chooser, o input video."""
+        # Listar menú para depurar
         labels = page.evaluate(
             """() => [...document.querySelectorAll('button[role="menuitem"]')]
                 .map(el => el.getAttribute('aria-label') || '')"""
         )
-        print("  No hallé Photos & videos. menuitems =", labels)
-        return False
+        print("  menuitems:", labels)
 
-    def _adjuntar():
+        def _js_click_photos():
+            return page.evaluate(
+                """() => {
+                    const items = [...document.querySelectorAll('button[role="menuitem"]')];
+                    const btn = items.find(el => {
+                        const a = (el.getAttribute('aria-label') || '');
+                        const low = a.toLowerCase();
+                        if (low.includes('sticker')) return false;
+                        // HTML: aria-label="Photos & videos" (ampersand decodificado)
+                        if (a === 'Photos & videos' || a === 'Fotos y videos') return true;
+                        if (low.includes('photos') && low.includes('video')) return true;
+                        if (low.includes('fotos') && low.includes('video')) return true;
+                        return false;
+                    });
+                    if (!btn) return 'NO_BTN';
+                    btn.scrollIntoView({block: 'center', inline: 'center'});
+                    const opts = {bubbles: true, cancelable: true, view: window, buttons: 1};
+                    try {
+                        btn.dispatchEvent(new PointerEvent('pointerdown', opts));
+                    } catch (e) {}
+                    btn.dispatchEvent(new MouseEvent('mousedown', opts));
+                    try {
+                        btn.dispatchEvent(new PointerEvent('pointerup', opts));
+                    } catch (e) {}
+                    btn.dispatchEvent(new MouseEvent('mouseup', opts));
+                    btn.dispatchEvent(new MouseEvent('click', opts));
+                    btn.click();
+                    return btn.getAttribute('aria-label') || 'OK';
+                }"""
+            )
+
+        # A) file chooser + clic JS (lo que WhatsApp dispara al elegir Photos & videos)
         try:
-            with page.expect_file_chooser(timeout=25000) as fc_info:
-                if not _clic_photos_videos():
-                    raise RuntimeError("sin clic Photos & videos")
+            with page.expect_file_chooser(timeout=30000) as fc_info:
+                clicked = _js_click_photos()
+                print("  Clic Photos & videos →", clicked)
+                if clicked == "NO_BTN":
+                    # Fallback Playwright locator
+                    loc = page.locator(
+                        'button[role="menuitem"][aria-label="Photos & videos"], '
+                        'button[role="menuitem"][aria-label*="Photos"]'
+                    )
+                    if loc.count():
+                        loc.first.click(timeout=8000, force=True)
+                        print("  Clic force locator Photos")
+                    else:
+                        raise RuntimeError("no está el botón Photos & videos")
             fc_info.value.set_files(ruta_abs)
-            print("  JPEG inyectado (Photos & videos, no sticker).")
+            print("  JPEG inyectado vía file chooser.")
             print("  Ruta:", ruta_abs)
             return True
         except Exception as e:
             print("  file chooser:", str(e).split("\n")[0])
 
-        # Plan B: input con video ya en el DOM
+        # B) Sin chooser: input file con video (nunca sticker)
+        page.wait_for_timeout(500)
         n = page.locator('input[type="file"]').count()
+        print("  inputs file:", n)
         for i in range(n):
             el = page.locator('input[type="file"]').nth(i)
             accept = (el.get_attribute("accept") or "").lower()
+            print("   ", i, accept[:80])
             if "video" not in accept:
                 continue
             try:
                 el.set_input_files(ruta_abs)
-                print("  JPEG por input video:", accept[:70])
+                print("  JPEG por input video.")
                 return True
-            except Exception:
-                continue
+            except Exception as e2:
+                print("   set falló:", str(e2).split("\n")[0])
         return False
 
     if not _abrir_clip():
-        print("No encontré Attach.")
+        print("No encontré / no abrí Attach.")
         return False
-    print("Clip abierto; espero role=menu...")
-    if not _esperar_menu():
-        print("No apareció el menú (role=menu).")
-        return False
-    # Un momento para que WhatsApp monte los menuitem (Document, Photos & videos, ...)
-    page.wait_for_timeout(700)
+    page.wait_for_timeout(800)
 
-    if not _adjuntar():
-        print("No pude adjuntar la foto (no cierro el chat).")
+    if not _inyectar_jpeg():
+        print("No pude adjuntar (Photos & videos). El chat se queda abierto.")
         return False
 
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')

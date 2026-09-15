@@ -75,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.12** — Espera aria-expanded + clic JS a Photos & videos
 - **v1.4.11** — Menú: clic a `menuitem` Photos & videos del HTML
 - **v1.4.10** — Foto fija: `aria-label="Photos & videos"` + JPEG grande
 - **v1.4.9** — Attach + expect_file_chooser en Photos & videos
