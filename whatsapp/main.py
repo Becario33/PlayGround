@@ -121,43 +121,67 @@ def _etiqueta_antier():
     return (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
 
 
-# Encabezados exactos del layout (AY–BK). Multilínea = \n como en la hoja.
+# Layout vacío clonado de: Películas Semana 37.xlsx → "Top Fin de Semana" AY4:BK16
+# Colores/anchos/bordes leídos del Excel (hair + fill #F2F2F2).
 ENCABEZADOS_LAYOUT_FS = (
     "Rank",
     "Película",
     "Asistencia Nacional",
     "Taquilla Nacional",
-    "MS CNMX\nAsistencia",
-    "MS SA CNMX\nAsistencia",
+    "MS CNMX Asistencia",
+    "MS SA CNMX Asistencia",
     "Dif SA",
-    "MS CNMX\nTaquilla",
-    "MS SA Cnmx\nTaquilla",
+    "MS CNMX Taquilla",
+    "MS SA Cnmx Taquilla",
     "Dif SA",
     "PPB CNMX",
     "PPB SA",
     "Dif SA",
 )
-FILAS_DATOS_LAYOUT = 10  # Rank 1–10 en blanco
+# Anchos Excel (character width); None → default 8.43
+_ANCHOS_EXCEL_FS = (
+    8.43, 32.0, 16.0, 16.53125, 9.19921875, 12.19921875, 9.19921875,
+    8.43, 11.796875, 9.19921875, 8.43, 9.19921875, 9.19921875,
+)
+_ALTO_HEADER_PT = 32.55
+_ALTO_FILA_PT = 15.75
+_FILL_GRIS = "#F2F2F2"  # header / Película / Total (rgb FFF2F2F2 del xlsx)
+_BORDE_HAIR = "#A6A6A6"  # theme lt1 tint≈0.35
+_TXT_HEADER = "#595959"
+_TXT_CUERPO = "#404040"
+
+
+def _excel_width_px(width_chars, escala):
+    return max(int(round((float(width_chars) + 0.75) * 7 * escala)), int(20 * escala))
+
+
+def _excel_height_px(points, escala):
+    return max(int(round(float(points) * 96 / 72 * escala)), int(12 * escala))
 
 
 def captura_layout_vacio():
     """
-    Imagen del layout vacío (solo encabezados), estilo hoja FS.
-    Sin SQL ni números. Para validar el diseño en WhatsApp.
+    Imagen layout AY4:BK16 vacía, visual como el Excel (bordes hair, grises, wrap).
+    Solo textos: encabezados fila 4 + 'Total' en Película. Sin números ni ranks.
     """
     from PIL import Image, ImageDraw, ImageFont
 
     escala = 2
-    pad_x, pad_y = 8 * escala, 6 * escala
-    # Anchos relativos (Película más ancha, como en la captura)
-    anchos_base = [56, 220, 110, 110, 88, 100, 64, 88, 100, 64, 80, 72, 64]
-    anchos = [w * escala for w in anchos_base]
     headers = list(ENCABEZADOS_LAYOUT_FS)
+    anchos = [_excel_width_px(w, escala) for w in _ANCHOS_EXCEL_FS]
+    alto_h = _excel_height_px(_ALTO_HEADER_PT, escala)
+    alto_f = _excel_height_px(_ALTO_FILA_PT, escala)
+    filas_cuerpo = 12  # 5–14 datos, 15 vacía, 16 Total
+    w = sum(anchos) + 1
+    h = alto_h + alto_f * filas_cuerpo + 1
 
-    def _fuente(size, bold=False):
-        candidatos = (
+    def _font(size_pt, bold=False):
+        px = max(1, int(round(size_pt * 96 / 72 * escala)))
+        nombres = (
+            ("calibrib.ttf" if bold else "calibri.ttf"),
+            ("Calibri Bold.ttf" if bold else "Calibri.ttf"),
+            ("/Windows/Fonts/calibrib.ttf" if bold else "/Windows/Fonts/calibri.ttf"),
             ("arialbd.ttf" if bold else "arial.ttf"),
-            ("Arial Bold.ttf" if bold else "Arial.ttf"),
             ("/Windows/Fonts/arialbd.ttf" if bold else "/Windows/Fonts/arial.ttf"),
             (
                 "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
@@ -165,96 +189,95 @@ def captura_layout_vacio():
                 else "/System/Library/Fonts/Supplemental/Arial.ttf"
             ),
         )
-        for ruta in candidatos:
+        for ruta in nombres:
             try:
-                return ImageFont.truetype(ruta, size * escala)
+                return ImageFont.truetype(ruta, px)
             except Exception:
                 continue
         return ImageFont.load_default()
 
-    font_h = _fuente(10, bold=True)
-    font_cell = _fuente(10, bold=False)
-    medidor = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    font_h = _font(11, bold=True)
+    font_t = _font(11, bold=True)
+    draw_m = ImageDraw.Draw(Image.new("RGB", (8, 8)))
 
-    def _alto_texto(txt, fnt):
-        lineas = (txt or " ").split("\n")
-        h = 0
-        for ln in lineas:
-            b = medidor.textbbox((0, 0), ln or " ", font=fnt)
-            h += int(b[3] - b[1]) + 2 * escala
-        return max(h, int(12 * escala))
-
-    def _ancho_texto(txt, fnt):
-        mx = 1
-        for ln in (txt or " ").split("\n"):
-            b = medidor.textbbox((0, 0), ln or " ", font=fnt)
-            mx = max(mx, int(b[2] - b[0]))
-        return mx
-
-    # Ajustar anchos si el encabezado necesita más espacio
-    for i, h in enumerate(headers):
-        need = _ancho_texto(h, font_h) + pad_x * 2
-        if need > anchos[i]:
-            anchos[i] = need
-
-    alto_header = max(_alto_texto(h, font_h) for h in headers) + pad_y * 2
-    alto_fila = int(22 * escala) + pad_y
-    # header + 10 filas + 1 vacía + 1 total (en blanco)
-    n_filas_cuerpo = FILAS_DATOS_LAYOUT + 2
-    w = sum(anchos) + 2
-    h = alto_header + alto_fila * n_filas_cuerpo + 2
+    def _wrap(texto, fnt, max_w, pad):
+        palabras = str(texto).split()
+        if not palabras:
+            return [""]
+        lineas, actual = [], palabras[0]
+        for p in palabras[1:]:
+            prueba = actual + " " + p
+            bb = draw_m.textbbox((0, 0), prueba, font=fnt)
+            if (bb[2] - bb[0]) <= max_w - pad * 2:
+                actual = prueba
+            else:
+                lineas.append(actual)
+                actual = p
+        lineas.append(actual)
+        return lineas
 
     img = Image.new("RGB", (w, h), "white")
     draw = ImageDraw.Draw(img)
-    gris_header = "#E7E6E6"
-    gris_linea = "#808080"
-    texto_header = "#404040"
+    pad = max(2, int(3 * escala))
 
-    # Encabezado
-    draw.rectangle([0, 0, w - 1, alto_header - 1], fill=gris_header)
+    draw.rectangle([0, 0, w - 1, alto_h - 1], fill=_FILL_GRIS)
     x = 0
     for i, titulo in enumerate(headers):
         aw = anchos[i]
-        # Texto centrado (Rank/Película un poco a la izquierda como en hoja)
-        lineas = titulo.split("\n")
-        th = _alto_texto(titulo, font_h)
-        y0 = (alto_header - th) // 2
+        lineas = _wrap(titulo, font_h, aw, pad)
+        alt_lin = []
         for ln in lineas:
-            tw = _ancho_texto(ln, font_h)
-            if i <= 1:
-                tx = x + pad_x
-            else:
-                tx = x + (aw - tw) // 2
-            draw.text((tx, y0), ln, font=font_h, fill=texto_header)
-            y0 += _alto_texto(ln, font_h)
+            bb = draw_m.textbbox((0, 0), ln, font=font_h)
+            alt_lin.append(bb[3] - bb[1])
+        th = sum(alt_lin) + max(0, len(lineas) - 1) * int(1 * escala)
+        y0 = max(pad, (alto_h - th) // 2)
+        for ln, lh in zip(lineas, alt_lin):
+            bb = draw_m.textbbox((0, 0), ln, font=font_h)
+            tw = bb[2] - bb[0]
+            tx = x + pad if i <= 1 else x + (aw - tw) // 2
+            draw.text((tx, y0), ln, font=font_h, fill=_TXT_HEADER)
+            y0 += lh + int(1 * escala)
         x += aw
 
-    # Línea punteada bajo encabezado (como en la imagen)
-    y = alto_header
-    paso = 4 * escala
-    for px in range(0, w, paso * 2):
-        draw.line([(px, y), (min(px + paso, w - 1), y)], fill="black", width=max(1, escala // 2))
+    x = 0
+    for aw in anchos:
+        draw.line([(x, 0), (x, alto_h)], fill=_BORDE_HAIR, width=1)
+        x += aw
+    draw.line([(0, 0), (w - 1, 0)], fill=_BORDE_HAIR, width=1)
+    draw.line([(w - 1, 0), (w - 1, alto_h)], fill=_BORDE_HAIR, width=1)
+    draw.line([(0, alto_h - 1), (w - 1, alto_h - 1)], fill=_BORDE_HAIR, width=1)
 
-    # Filas vacías + rejilla
-    for r in range(n_filas_cuerpo):
-        y1 = alto_header + r * alto_fila
-        y2 = y1 + alto_fila
-        # línea horizontal punteada
-        for px in range(0, w, paso * 2):
-            draw.line(
-                [(px, y2), (min(px + paso, w - 1), y2)],
-                fill=gris_linea,
-                width=max(1, escala // 2),
-            )
-        # Rank vacío deja el hueco visual; no escribimos números ni Total
-        _ = font_cell  # tipografía lista para cuando metamos datos
-
-    # Borde exterior
-    draw.rectangle([0, 0, w - 1, h - 1], outline="#B0B0B0")
+    for r in range(filas_cuerpo):
+        y1 = alto_h + r * alto_f
+        y2 = y1 + alto_f
+        es_sep = r == 10
+        es_total = r == 11
+        x = 0
+        for i, aw in enumerate(anchos):
+            if es_total:
+                fill = _FILL_GRIS
+            elif es_sep:
+                fill = "white"
+            elif i == 1:
+                fill = _FILL_GRIS
+            else:
+                fill = "white"
+            draw.rectangle([x, y1, x + aw - 1, y2 - 1], fill=fill)
+            if es_total and i == 1:
+                draw.text((x + pad, y1 + pad), "Total", font=font_t, fill=_TXT_HEADER)
+            if not es_sep and not es_total:
+                draw.rectangle(
+                    [x, y1, x + aw - 1, y2 - 1],
+                    outline=_BORDE_HAIR,
+                    width=1,
+                )
+            x += aw
+        if es_total:
+            draw.line([(0, y2 - 1), (w - 1, y2 - 1)], fill=_BORDE_HAIR, width=1)
 
     ruta = os.path.join(_dir_resultados(), "layout_fs_vacio.jpg")
     img.save(ruta, format="JPEG", quality=95, optimize=True)
-    print("Layout vacío (solo encabezados):")
+    print("Layout vacío (clon visual Excel AY4:BK16):")
     print(" ", ruta)
     print(" ", img.size[0], "x", img.size[1])
     return ruta
