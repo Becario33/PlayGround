@@ -261,7 +261,7 @@ def _borde_color(cell):
 
 
 def _imagen_casi_blanca(ruta_o_img, umbral=0.995):
-    """True si la imagen es casi toda blanca (captura fallida)."""
+    """True si la imagen casi no tiene contenido (blanco/gris vacío)."""
     from PIL import Image
 
     if hasattr(ruta_o_img, "size"):
@@ -274,11 +274,22 @@ def _imagen_casi_blanca(ruta_o_img, umbral=0.995):
         img = img.convert("RGB")
     # muestreo rápido
     small = img.resize((min(200, img.size[0]), min(120, img.size[1])))
-    px = list(small.getdata())
+    gris = small.convert("L")
+    px = list(gris.getdata())
     if not px:
         return True
-    blancos = sum(1 for r, g, b in px if r > 250 and g > 250 and b > 250)
-    return (blancos / float(len(px))) >= umbral
+    # casi todo muy claro
+    claros = sum(1 for p in px if p > 245)
+    if (claros / float(len(px))) >= umbral:
+        return True
+    # poco contraste / casi sin tinta (COM a veces da un rectángulo gris vacío)
+    mn, mx = gris.getextrema()
+    if (mx - mn) < 50:
+        return True
+    oscuros = sum(1 for p in px if p < 200)
+    if oscuros < max(3, int(len(px) * 0.005)):
+        return True
+    return False
 
 
 def _captura_excel_com(xlsx_path, jpg_path):
@@ -399,31 +410,39 @@ def _captura_excel_com(xlsx_path, jpg_path):
 def captura_xlsx_como_imagen(xlsx_path):
     """
     Plantilla en layout/ → JPEG para WhatsApp.
-    En Windows intenta Excel COM; si falla o sale blanco, Pillow.
+    Pillow primero (estable). Excel COM solo si Pillow falla o sale vacío.
     """
     out = os.path.join(
         _dir_resultados(),
         os.path.splitext(os.path.basename(xlsx_path))[0] + "_wa.jpg",
     )
     print("Plantilla layout → imagen:")
-    print(" ", xlsx_path)
-    if _captura_excel_com(xlsx_path, out):
+    print(" ", os.path.abspath(xlsx_path))
+    if not os.path.isfile(xlsx_path):
+        raise RuntimeError("No existe el Excel: " + xlsx_path)
+
+    # 1) Pillow primero
+    try:
+        _captura_xlsx_pillow(xlsx_path, out)
         if not _imagen_casi_blanca(out):
+            print("  OK Pillow")
             print(" ", out)
             return out
-        print("  COM dio imagen blanca; uso Pillow.")
-        try:
-            os.remove(out)
-        except Exception:
-            pass
-    _captura_xlsx_pillow(xlsx_path, out)
-    if _imagen_casi_blanca(out):
-        raise RuntimeError(
-            "La imagen salió en blanco. Revisa que el Excel en layout/ tenga datos "
-            "y que no esté abierto/bloqueado por otro Excel."
-        )
-    print(" ", out)
-    return out
+        print("  Pillow salió vacío; pruebo Excel COM...")
+    except Exception as e:
+        print("  Pillow falló:", str(e).split("\n")[0])
+
+    # 2) Excel COM
+    if _captura_excel_com(xlsx_path, out) and not _imagen_casi_blanca(out):
+        print("  OK Excel COM")
+        print(" ", out)
+        return out
+
+    raise RuntimeError(
+        "No pude generar imagen con contenido desde:\n  "
+        + xlsx_path
+        + "\nCierra el Excel si está abierto y reintenta."
+    )
 
 
 def _captura_xlsx_pillow(xlsx_path, jpg_path):
