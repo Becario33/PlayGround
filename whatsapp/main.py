@@ -260,16 +260,38 @@ def _borde_color(cell):
     return "#A6A6A6"
 
 
+def _imagen_casi_blanca(ruta_o_img, umbral=0.995):
+    """True si la imagen es casi toda blanca (captura fallida)."""
+    from PIL import Image
+
+    if hasattr(ruta_o_img, "size"):
+        img = ruta_o_img
+    else:
+        if not os.path.isfile(ruta_o_img):
+            return True
+        img = Image.open(ruta_o_img)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    # muestreo rápido
+    small = img.resize((min(200, img.size[0]), min(120, img.size[1])))
+    px = list(small.getdata())
+    if not px:
+        return True
+    blancos = sum(1 for r, g, b in px if r > 250 and g > 250 and b > 250)
+    return (blancos / float(len(px))) >= umbral
+
+
 def _captura_excel_com(xlsx_path, jpg_path):
     """
-    Windows: copia visual del rango usado con Excel (tal cual lo ves).
+    Windows: exporta el UsedRange con Excel (Chart.Export / CopyPicture).
+    Rechaza capturas en blanco.
     """
     if sys.platform != "win32":
         return False
     try:
         import pythoncom
         from win32com.client import Dispatch
-        from PIL import ImageGrab
+        from PIL import Image, ImageGrab
     except Exception as e:
         print("  Excel COM no disponible:", str(e).split("\n")[0])
         return False
@@ -277,33 +299,87 @@ def _captura_excel_com(xlsx_path, jpg_path):
     pythoncom.CoInitialize()
     excel = None
     wb = None
+    chart_obj = None
     try:
         excel = Dispatch("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
         excel.ScreenUpdating = False
         ruta = os.path.abspath(xlsx_path)
-        wb = excel.Workbooks.Open(ruta, ReadOnly=True)
+        wb = excel.Workbooks.Open(ruta, ReadOnly=True, UpdateLinks=0)
         ws = wb.ActiveSheet
         rng = ws.UsedRange
-        # 1=xlScreen, 2=xlBitmap
+        if rng is None:
+            print("  Excel COM: UsedRange vacío")
+            return False
+
+        # 1) Método Chart.Export (más fiable que el portapapeles)
+        try:
+            width = float(rng.Width)
+            height = float(rng.Height)
+            if width < 10 or height < 10:
+                raise RuntimeError("rango demasiado chico")
+            left = float(rng.Left)
+            top = float(rng.Top)
+            chart_obj = ws.ChartObjects().Add(left, top, width, height)
+            chart = chart_obj.Chart
+            rng.CopyPicture(Appearance=1, Format=2)  # xlScreen, xlBitmap
+            chart.Paste()
+            # Export pide ruta absoluta; png/jpg según extensión
+            export_path = os.path.abspath(jpg_path)
+            # Excel Export a veces prefiere .png
+            png_tmp = export_path.rsplit(".", 1)[0] + "_com.png"
+            ok_exp = chart.Export(png_tmp)
+            chart_obj.Delete()
+            chart_obj = None
+            if ok_exp and os.path.isfile(png_tmp):
+                img = Image.open(png_tmp).convert("RGB")
+                try:
+                    os.remove(png_tmp)
+                except Exception:
+                    pass
+                if not _imagen_casi_blanca(img):
+                    img.save(jpg_path, format="JPEG", quality=95, optimize=True)
+                    print("  Captura Excel COM Chart.Export:", img.size[0], "x", img.size[1])
+                    return True
+                print("  Excel COM Chart.Export salió blanco; pruebo clipboard...")
+        except Exception as e:
+            print("  Excel COM Chart.Export:", str(e).split("\n")[0])
+            try:
+                if chart_obj is not None:
+                    chart_obj.Delete()
+                    chart_obj = None
+            except Exception:
+                pass
+
+        # 2) Clipboard
         rng.CopyPicture(Appearance=1, Format=2)
+        time.sleep(0.4)
         img = ImageGrab.grabclipboard()
         if img is None:
-            rng.CopyPicture(Appearance=1, Format=-4147)  # xlPicture
+            rng.CopyPicture(Appearance=1, Format=-4147)
+            time.sleep(0.4)
             img = ImageGrab.grabclipboard()
         if img is None:
-            print("  Excel COM: portapapeles vacío tras CopyPicture")
+            print("  Excel COM: portapapeles vacío")
             return False
         if img.mode != "RGB":
             img = img.convert("RGB")
+        if _imagen_casi_blanca(img):
+            print("  Excel COM clipboard casi blanco; no sirve")
+            return False
         img.save(jpg_path, format="JPEG", quality=95, optimize=True)
-        print("  Captura Excel COM (tal cual):", img.size[0], "x", img.size[1])
+        print("  Captura Excel COM clipboard:", img.size[0], "x", img.size[1])
         return True
     except Exception as e:
         print("  Excel COM falló:", str(e).split("\n")[0])
         return False
     finally:
+        try:
+            if chart_obj is not None:
+                chart_obj.Delete()
+        except Exception:
+            pass
         try:
             if wb is not None:
                 wb.Close(False)
@@ -318,6 +394,36 @@ def _captura_excel_com(xlsx_path, jpg_path):
             pythoncom.CoUninitialize()
         except Exception:
             pass
+
+
+def captura_xlsx_como_imagen(xlsx_path):
+    """
+    Plantilla en layout/ → JPEG para WhatsApp.
+    En Windows intenta Excel COM; si falla o sale blanco, Pillow.
+    """
+    out = os.path.join(
+        _dir_resultados(),
+        os.path.splitext(os.path.basename(xlsx_path))[0] + "_wa.jpg",
+    )
+    print("Plantilla layout → imagen:")
+    print(" ", xlsx_path)
+    if _captura_excel_com(xlsx_path, out):
+        if not _imagen_casi_blanca(out):
+            print(" ", out)
+            return out
+        print("  COM dio imagen blanca; uso Pillow.")
+        try:
+            os.remove(out)
+        except Exception:
+            pass
+    _captura_xlsx_pillow(xlsx_path, out)
+    if _imagen_casi_blanca(out):
+        raise RuntimeError(
+            "La imagen salió en blanco. Revisa que el Excel en layout/ tenga datos "
+            "y que no esté abierto/bloqueado por otro Excel."
+        )
+    print(" ", out)
+    return out
 
 
 def _captura_xlsx_pillow(xlsx_path, jpg_path):
@@ -449,26 +555,6 @@ def _captura_xlsx_pillow(xlsx_path, jpg_path):
     img.save(jpg_path, format="JPEG", quality=95, optimize=True)
     print("  Captura Pillow (fallback):", img.size[0], "x", img.size[1])
     return True
-
-
-def captura_xlsx_como_imagen(xlsx_path):
-    """
-    Plantilla en layout/ → JPEG para WhatsApp.
-    En Windows intenta Excel COM (copia visual exacta); si no, Pillow con estilos.
-    """
-    out = os.path.join(
-        _dir_resultados(),
-        os.path.splitext(os.path.basename(xlsx_path))[0] + "_wa.jpg",
-    )
-    print("Plantilla layout → imagen:")
-    print(" ", xlsx_path)
-    if _captura_excel_com(xlsx_path, out):
-        print(" ", out)
-        return out
-    _captura_xlsx_pillow(xlsx_path, out)
-    print(" ", out)
-    return out
-
 
 
 # Layout vacío clonado de: Películas Semana 37.xlsx → "Top Fin de Semana" AY4:BK16
