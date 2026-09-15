@@ -75,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.4.10** — Foto fija: `aria-label="Photos & videos"` + JPEG grande
 - **v1.4.9** — Attach + expect_file_chooser en Photos & videos
 - **v1.4.8** — Envío sin Explorador (clip + input video)
 - **v1.4.7** — Restaura `main.py` de `v1.3.8` (foto estable)

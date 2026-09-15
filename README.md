@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.10** — Photos & videos por aria-label; JPEG ≥1280×720; esperas lentas
 - **v1.4.9** — Attach + file chooser de Photos & videos (sin colgarse)
 - **v1.4.8** — Envío: clip + input foto, sin clic al Explorador
 - **v1.4.7** — Restaura lógica estable de `v1.3.8` (foto, no sticker)
