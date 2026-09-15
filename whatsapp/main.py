@@ -295,31 +295,10 @@ def _captura_pillow(xlsx_path, jpg_path):
     for c in range(ncols - 1):
         x += anchos[c]
         draw.line([(x, altos[0]), (x, h - 1)], fill="#C8C8C8")
-    # Lienzo fijo 1280×720 (foto). Escalar la tabla a banner ultra-ancho
-    # hace que WhatsApp a veces la mande como sticker.
-    canvas_w, canvas_h = 1280, 720
-    margen = 48
-    try:
-        resample = Image.Resampling.LANCZOS
-    except AttributeError:
-        resample = Image.LANCZOS
-    max_w = canvas_w - margen * 2
-    max_h = canvas_h - margen * 2
-    fill = min(max_w / float(tabla.width), max_h / float(tabla.height))
-    if abs(fill - 1.0) > 0.001:
-        tabla = tabla.resize(
-            (max(1, int(round(tabla.width * fill))),
-             max(1, int(round(tabla.height * fill)))),
-            resample,
-        )
+    # Solo la tabla (sin lienzo gris). El anti-sticker ya va por paste/Document.
     tabla = tabla.convert("RGB")
-    canvas = Image.new("RGB", (canvas_w, canvas_h), "#F2F2F2")
-    canvas.paste(
-        tabla,
-        ((canvas_w - tabla.width) // 2, (canvas_h - tabla.height) // 2),
-    )
-    canvas.save(jpg_path, format="JPEG", quality=95, optimize=True)
-    print("  JPEG foto:", canvas.size[0], "x", canvas.size[1])
+    tabla.save(jpg_path, format="JPEG", quality=95, optimize=True)
+    print("  JPEG foto:", tabla.size[0], "x", tabla.size[1])
     return jpg_path
 
 

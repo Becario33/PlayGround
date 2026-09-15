@@ -75,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.5.1** — Captura sin bordes/lienzo 1280×720
 - **v1.5.0** — Paste foto o Document (ya no clip image/* → sticker)
 - **v1.4.16** — Cancel en Discard; ya no Escape con preview
 - **v1.4.15** — Lienzo 1280×720 + clic Photos & videos (anti-sticker)

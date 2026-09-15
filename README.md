@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.5.1** — JPEG solo tabla (sin lienzo gris)
 - **v1.5.0** — Envío por paste o Document (deja de usar image/* que vira a sticker)
 - **v1.4.16** — Sin Escape en preview (evita Discard selection)
 - **v1.4.15** — Foto 1280×720 + Attach→Photos (evita sticker)
