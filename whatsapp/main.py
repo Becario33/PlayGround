@@ -12,12 +12,14 @@ PERFIL = "chrome_whatsapp_perfil"
 GRUPO_DEFAULT = "Data Analytics"
 TEXTO_DEFAULT = "Prueba de persistencia: la sesión sigue abierta; el QR solo se escanea una vez."
 CONSULTA = """
-SELECT
-    FechaComscore,
-    SUM(CAST(Asistencia AS bigint)) AS AsistenciaIndustria
+SELECT TOP 10
+    NombrePelicula,
+    SUM(CAST(Taquilla AS bigint)) AS Taquilla,
+    SUM(CAST(Asistencia AS bigint)) AS Asistencia
 FROM [Programacion].[dbo].[ComscoreMPAMexico]
 WHERE FechaComscore = DATEADD(day, -1, CAST(GETDATE() AS date))
-GROUP BY FechaComscore
+GROUP BY NombrePelicula
+ORDER BY Taquilla DESC
 """.strip()
 DRIVERS_ODBC = (
     "ODBC Driver 17 for SQL Server",
@@ -102,8 +104,8 @@ def consulta_asistencia():
     if not filas:
         lineas.append("(sin filas para ayer)")
     else:
-        for fila in filas:
-            lineas.append(" | ".join(_celda(v) for v in fila))
+        for i, fila in enumerate(filas, 1):
+            lineas.append(f"{i} | " + " | ".join(_celda(v) for v in fila))
     return "\n".join(lineas), cols, filas
 
 
@@ -121,9 +123,11 @@ def armar_excel(cols, filas):
     wb = Workbook()
     ws = wb.active
     ws.title = "Comscore"
-    ws["A1"] = "Asistencia industria Comscore (ayer)"
+    ws["A1"] = "Top 10 películas por taquilla Comscore (ayer)"
     ws["A1"].font = Font(bold=True, size=14)
-    n = max(len(cols), 1)
+    # # | Película | Taquilla | Asistencia
+    headers = ["#"] + list(cols)
+    n = max(len(headers), 1)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n)
     encabezado = PatternFill("solid", fgColor="217346")
     fuente = Font(bold=True, color="FFFFFF")
@@ -133,7 +137,7 @@ def armar_excel(cols, filas):
         top=Side(style="thin", color="B0B0B0"),
         bottom=Side(style="thin", color="B0B0B0"),
     )
-    for i, col in enumerate(cols, 1):
+    for i, col in enumerate(headers, 1):
         cel = ws.cell(2, i, col)
         cel.fill = encabezado
         cel.font = fuente
@@ -141,10 +145,14 @@ def armar_excel(cols, filas):
         cel.border = borde
     if not filas:
         ws.cell(3, 1, "(sin filas para ayer)").border = borde
-        ws.cell(3, 2, "").border = borde
+        for c in range(2, n + 1):
+            ws.cell(3, c, "").border = borde
     else:
         for r, fila in enumerate(filas, 3):
-            for c, valor in enumerate(fila, 1):
+            cel_n = ws.cell(r, 1, r - 2)
+            cel_n.alignment = Alignment(horizontal="center")
+            cel_n.border = borde
+            for c, valor in enumerate(fila, 2):
                 cel = ws.cell(r, c)
                 if hasattr(valor, "strftime"):
                     cel.value = valor.strftime("%Y-%m-%d")
@@ -152,12 +160,18 @@ def armar_excel(cols, filas):
                 else:
                     cel.value = valor
                     if isinstance(valor, (int, float)):
-                        cel.number_format = "#,##0"
+                        # Taquilla (col 3) con formato moneda simple; Asistencia enteros
+                        if c == 3:
+                            cel.number_format = '"$"#,##0'
+                        else:
+                            cel.number_format = "#,##0"
                         cel.alignment = Alignment(horizontal="right")
                 cel.border = borde
-    ws.column_dimensions["A"].width = 22
-    ws.column_dimensions["B"].width = 24
-    nombre = datetime.now().strftime("asistencia_%Y-%m-%d.xlsx")
+    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["B"].width = 42
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 14
+    nombre = datetime.now().strftime("top10_taquilla_%Y-%m-%d.xlsx")
     ruta = os.path.join(_dir_resultados(), nombre)
     wb.save(ruta)
     return ruta
@@ -196,11 +210,16 @@ def _captura_pillow(xlsx_path, jpg_path):
     filas = []
     for row in ws.iter_rows(min_row=1, max_col=n_cols, max_row=ws.max_row, values_only=True):
         celdas = []
-        for v in row:
+        for j, v in enumerate(row):
             if v is None:
                 celdas.append("")
             elif isinstance(v, (int, float)) and not isinstance(v, bool):
-                celdas.append(f"{int(v):,}")
+                # Columna Taquilla (por encabezado) con $
+                encabezados = filas[1] if len(filas) > 1 else []
+                if j < len(encabezados) and "taquilla" in str(encabezados[j]).lower():
+                    celdas.append(f"${int(v):,}")
+                else:
+                    celdas.append(f"{int(v):,}")
             else:
                 celdas.append(str(v))
         if any(c.strip() for c in celdas):
