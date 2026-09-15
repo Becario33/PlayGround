@@ -4,6 +4,7 @@
 
 import argparse
 import os
+import shutil
 import sys
 import time
 
@@ -11,15 +12,16 @@ URL_WA = "https://web.whatsapp.com/"
 PERFIL = "chrome_whatsapp_perfil"
 GRUPO_DEFAULT = "Data Analytics"
 TEXTO_DEFAULT = "Prueba de persistencia: la sesión sigue abierta; el QR solo se escanea una vez."
+PLANTILLA_NOMBRE = "Plantilla.xlsx"
 CONSULTA = """
 SELECT TOP 10
     NombrePelicula,
-    SUM(CAST(Taquilla AS bigint)) AS Taquilla,
-    SUM(CAST(Asistencia AS bigint)) AS Asistencia
+    SUM(CAST(Asistencia AS bigint)) AS Asistencia,
+    SUM(CAST(Taquilla AS bigint)) AS Taquilla
 FROM [Programacion].[dbo].[ComscoreMPAMexico]
-WHERE FechaComscore = DATEADD(day, -2, CAST(GETDATE() AS date))
+WHERE FechaComscore = DATEADD(day, -1, CAST(GETDATE() AS date))
 GROUP BY NombrePelicula
-ORDER BY Taquilla DESC
+ORDER BY Asistencia DESC
 """.strip()
 DRIVERS_ODBC = (
     "ODBC Driver 17 for SQL Server",
@@ -102,7 +104,7 @@ def consulta_asistencia():
         conn.close()
     lineas = [" | ".join(cols)]
     if not filas:
-        lineas.append("(sin filas para antier)")
+        lineas.append("(sin filas para ayer)")
     else:
         for i, fila in enumerate(filas, 1):
             lineas.append(f"{i} | " + " | ".join(_celda(v) for v in fila))
@@ -115,11 +117,16 @@ def _dir_resultados():
     return ruta
 
 
+def _etiqueta_ayer():
+    from datetime import date, timedelta
+
+    return (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def _etiqueta_antier():
     from datetime import date, timedelta
 
     return (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
-
 
 
 DIR_LAYOUT = "layout"
@@ -131,22 +138,73 @@ def _dir_layout():
     return ruta
 
 
-def excel_en_layout():
-    """Devuelve el .xlsx más reciente en whatsapp/layout/ (plantilla)."""
-    carpeta = _dir_layout()
-    archivos = [
-        os.path.join(carpeta, n)
-        for n in os.listdir(carpeta)
-        if n.lower().endswith(".xlsx") and not n.startswith("~$")
-    ]
-    if not archivos:
+def plantilla_oficial():
+    """Ruta fija de layout/Plantilla.xlsx (no se modifica)."""
+    ruta = os.path.join(_dir_layout(), PLANTILLA_NOMBRE)
+    if not os.path.isfile(ruta):
         raise RuntimeError(
-            "No hay Excel en:\n  "
-            + carpeta
-            + "\nPon ahí la plantilla .xlsx y vuelve a correr."
+            "Falta la plantilla oficial:\n  "
+            + ruta
+            + "\nPon Plantilla.xlsx en layout/ y vuelve a correr."
         )
-    archivos.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-    return archivos[0]
+    return ruta
+
+
+def excel_en_layout():
+    """Compat: plantilla oficial fija."""
+    return plantilla_oficial()
+
+
+def llenar_plantilla_top10(cols, filas):
+    """
+    Copia Plantilla.xlsx a resultados/ y escribe solo .value
+    (como tecleo humano): B=Película, C=Asistencia, D=Taquilla, Total C15/D15.
+    No toca font, fill, number_format ni formato condicional.
+    """
+    from openpyxl import load_workbook
+
+    dia = _etiqueta_ayer()
+    destino = os.path.join(_dir_resultados(), f"top10_asistencia_{dia}.xlsx")
+    shutil.copy2(plantilla_oficial(), destino)
+
+    por_nombre = {str(c).strip().lower(): i for i, c in enumerate(cols)}
+    for clave in ("nombrepelicula", "asistencia", "taquilla"):
+        if clave not in por_nombre:
+            raise RuntimeError(
+                "La consulta no trajo columna '" + clave + "'. Columnas: " + ", ".join(cols)
+            )
+
+    wb = load_workbook(destino)
+    ws = wb.active
+
+    total_asist = 0
+    total_taq = 0
+    for i in range(10):
+        fila_excel = 3 + i
+        if i < len(filas):
+            fila = filas[i]
+            pelicula = fila[por_nombre["nombrepelicula"]]
+            asist = fila[por_nombre["asistencia"]]
+            taq = fila[por_nombre["taquilla"]]
+            ws.cell(fila_excel, 2).value = pelicula
+            ws.cell(fila_excel, 3).value = int(asist) if asist is not None else None
+            ws.cell(fila_excel, 4).value = int(taq) if taq is not None else None
+            if asist is not None:
+                total_asist += int(asist)
+            if taq is not None:
+                total_taq += int(taq)
+        else:
+            ws.cell(fila_excel, 2).value = None
+            ws.cell(fila_excel, 3).value = None
+            ws.cell(fila_excel, 4).value = None
+
+    ws.cell(15, 3).value = total_asist if filas else None
+    ws.cell(15, 4).value = total_taq if filas else None
+    wb.save(destino)
+    wb.close()
+    print("Copia con datos (Plantilla intacta):")
+    print(" ", destino)
+    return destino
 
 
 def _fmt_celda_excel(valor, num_fmt):
@@ -452,26 +510,26 @@ def _captura_excel_com(xlsx_path, jpg_path):
 
 def captura_xlsx_como_imagen(xlsx_path):
     """
-    Plantilla layout/ → foto EXACTA del Excel (Windows COM).
+    Excel con datos (resultados/) → foto EXACTA (Windows COM).
     Pillow solo si no hay Excel/COM (Mac o fallo total).
     """
     out = os.path.join(
         _dir_resultados(),
         os.path.splitext(os.path.basename(xlsx_path))[0] + "_wa.jpg",
     )
-    print("Plantilla layout → captura Excel:")
+    print("Excel → captura (tal cual se ve):")
     print(" ", os.path.abspath(xlsx_path))
     if not os.path.isfile(xlsx_path):
         raise RuntimeError("No existe el Excel: " + xlsx_path)
 
-    # Windows: foto real del Excel (altos, colores, merges tal cual)
+    # Windows: foto real del Excel (CF, formatos, merges tal cual)
     if sys.platform == "win32":
         if _captura_excel_com(xlsx_path, out) and not _imagen_casi_blanca(out):
             print("  OK captura Excel (réplica visual)")
             print(" ", out)
             return out
         print("  AVISO: Excel COM falló; Pillow NO es idéntico al Excel.")
-        print("  Cierra TODO Excel, deja solo layout\\*.xlsx y reintenta.")
+        print("  Cierra TODO Excel y reintenta.")
 
     # Fallback (Mac / si COM no está)
     _captura_xlsx_pillow(xlsx_path, out)
@@ -1517,7 +1575,7 @@ def main():
     ap.add_argument(
         "--top10",
         action="store_true",
-        help="Manda el Top 10 antier (SQL). Por defecto: Excel en layout/ como imagen.",
+        help="Manda el Top 10 de ayer por asistencia (SQL → Plantilla en resultados/).",
     )
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
     args = ap.parse_args()
@@ -1529,29 +1587,20 @@ def main():
         texto = TEXTO_DEFAULT
     elif texto is None and not args.solo_abrir:
         try:
-            if args.top10:
-                texto, cols, filas = consulta_asistencia()
-                xlsx = armar_excel(cols, filas)
-                print("Excel:")
-                print(" ", xlsx)
-                imagen = captura_excel(xlsx)
-            else:
-                # Rama prueba: Excel en whatsapp/layout/ → imagen → WhatsApp
-                print("Modo layout/ plantilla Excel → imagen.")
-                xlsx = excel_en_layout()
-                imagen = captura_xlsx_como_imagen(xlsx)
-                texto = f"(imagen de {os.path.basename(xlsx)})"
+            # Default y --top10: SQL Top10 ayer → copia Plantilla en resultados/ → captura
+            print("Top 10 ayer por asistencia → Plantilla (copia en resultados/).")
+            texto, cols, filas = consulta_asistencia()
+            xlsx = llenar_plantilla_top10(cols, filas)
+            imagen = captura_xlsx_como_imagen(xlsx)
+            print("Resultado SQL:")
+            print(texto)
+            print()
         except Exception as e:
             print("No salió la consulta o la captura.")
             print(" ", str(e))
             return 1
-        if args.top10:
-            print("Resultado SQL:")
-            print(texto)
-            print()
-        else:
-            print("Se mandará la imagen del Excel de layout/.")
-            print()
+        print("Se mandará la captura del Excel en resultados/.")
+        print()
 
     try:
         from playwright.sync_api import sync_playwright
