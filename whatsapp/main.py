@@ -47,7 +47,8 @@ def _cargar_env():
             if not linea or linea.startswith("#") or "=" not in linea:
                 continue
             k, v = linea.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            # .env manda: no dejar un SQL_* vacío del sistema tapando la clave
+            os.environ[k.strip()] = v.strip().strip('"').strip("'")
     return True
 
 
@@ -68,20 +69,42 @@ def _conectar_sql():
             "Falta .env (SQL_SERVER, SQL_DATABASE, SQL_USER, SQL_PASSWORD).\n"
             "  copy .env.example .env"
         )
-    ultimo = None
-    for driver in DRIVERS_ODBC:
+    if not password:
+        raise RuntimeError(
+            "SQL_PASSWORD vacío en .env. Edita whatsapp\\.env y vuelve a correr."
+        )
+
+    instalados = [d for d in pyodbc.drivers()]
+    preferidos = [d for d in DRIVERS_ODBC if d in instalados]
+    if not preferidos:
+        raise RuntimeError(
+            "No hay driver ODBC de SQL Server. Instala 'ODBC Driver 17 for SQL Server'.\n"
+            "Drivers vistos: " + (", ".join(instalados) if instalados else "(ninguno)")
+        )
+
+    print("SQL: " + server + " / " + database + " (user " + user + ")")
+    print("Drivers a probar: " + ", ".join(preferidos))
+    errores = []
+    for driver in preferidos:
         extra = "TrustServerCertificate=yes;Encrypt=no;" if "18" in driver else ""
         conn_str = (
             f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};"
             f"UID={user};PWD={password};{extra}"
         )
         try:
-            return pyodbc.connect(conn_str, timeout=30)
+            conn = pyodbc.connect(conn_str, timeout=15)
+            print("  OK con driver:", driver)
+            return conn
         except Exception as e:
-            ultimo = e
+            msg = str(e).split("\n")[0]
+            errores.append(driver + " → " + msg)
+            print("  Falló", driver + ":", msg)
+
+    detalle = " | ".join(errores)
     raise RuntimeError(
-        "No conectó a SQL Server (¿estás en el corporativo?). "
-        + str(ultimo).split("\n")[0]
+        "No conectó a SQL Server (" + server + "). "
+        "Revisa red corporativa / VPN / firewall y que el .env tenga el server bien.\n"
+        + detalle
     )
 
 
