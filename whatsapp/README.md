@@ -1,6 +1,6 @@
 # PlayGround / whatsapp
 
-Top 10 películas por taquilla Comscore (ayer) en SQL Server: se arma un Excel, se captura y **la imagen** se manda al grupo **Data Analytics** por WhatsApp Web. Chrome persistente: QR **una vez** (carpeta `chrome_whatsapp_perfil/`, no tu Chrome de diario).
+Top 10 películas por taquilla Comscore (mes pasado) en SQL Server: se arma un Excel, se captura y **la imagen** se manda al grupo **Data Analytics** por WhatsApp Web. Chrome persistente: QR **una vez** (carpeta `chrome_whatsapp_perfil/`, no tu Chrome de diario).
 
 En cada PC nueva hay que escanear el QR. Esa carpeta y el `.env` no se suben a GitHub. La base `10.55.55.134` solo responde **en el corporativo**.
 
@@ -37,7 +37,7 @@ python -m playwright install chromium
 python main.py
 ```
 
-1. Corre el TOP 10 por taquilla (ayer).
+1. Corre el TOP 10 por taquilla (mes pasado).
 2. Arma el `.xlsx`, dibuja la tabla (Pillow) y abre WhatsApp.
 3. En el grupo Data Analytics manda solo la **imagen**.
 4. Enter y **cierra Chrome** antes de volver a correr.
@@ -55,7 +55,7 @@ python main.py --solo-abrir
 
 | Parte | Cómo |
 |--------|------|
-| SQL | TOP 10 `NombrePelicula` por `Taquilla` (ayer) |
+| SQL | TOP 10 por `Taquilla` del mes pasado (`Mes`) |
 | Excel | openpyxl en `resultados/` |
 | Captura | Pillow (tabla JPEG, estilo `v1.3.8`) |
 | Chrome | Playwright `launch_persistent_context` + Chrome del sistema |
@@ -75,6 +75,7 @@ chrome_whatsapp_perfil/    Sesión WhatsApp (no se sube)
 
 ## Versiones
 
+- **v1.6.1** — Filtro mes pasado (columna Mes)
 - **v1.6.0** — Top 10 por taquilla en vez de total asistencia
 - **v1.5.1** — Captura sin bordes/lienzo 1280×720
 - **v1.5.0** — Paste foto o Document (ya no clip image/* → sticker)

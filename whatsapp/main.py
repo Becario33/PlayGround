@@ -17,7 +17,7 @@ SELECT TOP 10
     SUM(CAST(Taquilla AS bigint)) AS Taquilla,
     SUM(CAST(Asistencia AS bigint)) AS Asistencia
 FROM [Programacion].[dbo].[ComscoreMPAMexico]
-WHERE FechaComscore = DATEADD(day, -1, CAST(GETDATE() AS date))
+WHERE Mes = FORMAT(DATEADD(month, -1, CAST(GETDATE() AS date)), 'yyyy-MM')
 GROUP BY NombrePelicula
 ORDER BY Taquilla DESC
 """.strip()
@@ -102,7 +102,7 @@ def consulta_asistencia():
         conn.close()
     lineas = [" | ".join(cols)]
     if not filas:
-        lineas.append("(sin filas para ayer)")
+        lineas.append("(sin filas para el mes pasado)")
     else:
         for i, fila in enumerate(filas, 1):
             lineas.append(f"{i} | " + " | ".join(_celda(v) for v in fila))
@@ -115,15 +115,28 @@ def _dir_resultados():
     return ruta
 
 
+def _etiqueta_mes_pasado():
+    from datetime import date
+
+    hoy = date.today()
+    anio = hoy.year
+    mes = hoy.month - 1
+    if mes == 0:
+        mes = 12
+        anio -= 1
+    return f"{anio}-{mes:02d}"
+
+
 def armar_excel(cols, filas):
     from datetime import datetime
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+    mes = _etiqueta_mes_pasado()
     wb = Workbook()
     ws = wb.active
     ws.title = "Comscore"
-    ws["A1"] = "Top 10 películas por taquilla Comscore (ayer)"
+    ws["A1"] = f"Top 10 películas por taquilla Comscore ({mes})"
     ws["A1"].font = Font(bold=True, size=14)
     # # | Película | Taquilla | Asistencia
     headers = ["#"] + list(cols)
@@ -144,7 +157,7 @@ def armar_excel(cols, filas):
         cel.alignment = Alignment(horizontal="center")
         cel.border = borde
     if not filas:
-        ws.cell(3, 1, "(sin filas para ayer)").border = borde
+        ws.cell(3, 1, "(sin filas para el mes pasado)").border = borde
         for c in range(2, n + 1):
             ws.cell(3, c, "").border = borde
     else:
@@ -160,7 +173,6 @@ def armar_excel(cols, filas):
                 else:
                     cel.value = valor
                     if isinstance(valor, (int, float)):
-                        # Taquilla (col 3) con formato moneda simple; Asistencia enteros
                         if c == 3:
                             cel.number_format = '"$"#,##0'
                         else:
