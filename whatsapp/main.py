@@ -17,7 +17,7 @@ SELECT TOP 10
     SUM(CAST(Taquilla AS bigint)) AS Taquilla,
     SUM(CAST(Asistencia AS bigint)) AS Asistencia
 FROM [Programacion].[dbo].[ComscoreMPAMexico]
-WHERE Mes = FORMAT(DATEADD(month, -1, CAST(GETDATE() AS date)), 'yyyy-MM')
+WHERE FechaComscore = DATEADD(day, -2, CAST(GETDATE() AS date))
 GROUP BY NombrePelicula
 ORDER BY Taquilla DESC
 """.strip()
@@ -102,7 +102,7 @@ def consulta_asistencia():
         conn.close()
     lineas = [" | ".join(cols)]
     if not filas:
-        lineas.append("(sin filas para el mes pasado)")
+        lineas.append("(sin filas para antier)")
     else:
         for i, fila in enumerate(filas, 1):
             lineas.append(f"{i} | " + " | ".join(_celda(v) for v in fila))
@@ -115,16 +115,10 @@ def _dir_resultados():
     return ruta
 
 
-def _etiqueta_mes_pasado():
-    from datetime import date
+def _etiqueta_antier():
+    from datetime import date, timedelta
 
-    hoy = date.today()
-    anio = hoy.year
-    mes = hoy.month - 1
-    if mes == 0:
-        mes = 12
-        anio -= 1
-    return f"{anio}-{mes:02d}"
+    return (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
 
 
 def armar_excel(cols, filas):
@@ -132,11 +126,11 @@ def armar_excel(cols, filas):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-    mes = _etiqueta_mes_pasado()
+    dia = _etiqueta_antier()
     wb = Workbook()
     ws = wb.active
     ws.title = "Comscore"
-    ws["A1"] = f"Top 10 películas por taquilla Comscore ({mes})"
+    ws["A1"] = f"Top 10 películas por taquilla Comscore ({dia})"
     ws["A1"].font = Font(bold=True, size=14)
     # # | Película | Taquilla | Asistencia
     headers = ["#"] + list(cols)
@@ -157,7 +151,7 @@ def armar_excel(cols, filas):
         cel.alignment = Alignment(horizontal="center")
         cel.border = borde
     if not filas:
-        ws.cell(3, 1, "(sin filas para el mes pasado)").border = borde
+        ws.cell(3, 1, "(sin filas para antier)").border = borde
         for c in range(2, n + 1):
             ws.cell(3, c, "").border = borde
     else:
