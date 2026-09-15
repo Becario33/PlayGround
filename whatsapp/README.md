@@ -20,6 +20,27 @@ Top 10 estable (antier) en esta rama: `python main.py --top10`
 
 Master/`v1.6.2` sigue intacto con el Top 10.
 
+
+## Rama `prueba/layout-fs37` — Excel de entrada → imagen
+
+1. Pon el `.xlsx` en:
+
+```bat
+whatsapp\entrada\
+```
+
+(Ejemplo: `whatsapp\entrada\prueba.xlsx`)
+
+2. Corre:
+
+```bat
+cd whatsapp
+python main.py
+```
+
+Toma el Excel más reciente de `entrada/`, lo dibuja como JPEG y lo manda al grupo (como imagen, no documento).  
+Top 10 SQL: `python main.py --top10`
+
 ## Requisitos
 
 - Python 3.9+

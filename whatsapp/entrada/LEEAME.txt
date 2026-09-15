@@ -1,0 +1,4 @@
+Pon aquí el .xlsx que quieras mandar (solo uno, o el más reciente).
+Al correr python main.py se convierte a imagen y se manda al grupo.
+
+Ejemplo: copia prueba.xlsx a esta carpeta.

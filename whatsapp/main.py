@@ -121,6 +121,210 @@ def _etiqueta_antier():
     return (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
 
 
+
+DIR_ENTRADA = "entrada"
+
+
+def _dir_entrada():
+    ruta = os.path.join(_dir_script(), DIR_ENTRADA)
+    os.makedirs(ruta, exist_ok=True)
+    return ruta
+
+
+def excel_en_entrada():
+    """Devuelve el .xlsx más reciente en whatsapp/entrada/."""
+    carpeta = _dir_entrada()
+    archivos = [
+        os.path.join(carpeta, n)
+        for n in os.listdir(carpeta)
+        if n.lower().endswith(".xlsx") and not n.startswith("~$")
+    ]
+    if not archivos:
+        raise RuntimeError(
+            "No hay Excel en:\n  "
+            + carpeta
+            + "\nCopia ahí el .xlsx (ej. prueba.xlsx) y vuelve a correr."
+        )
+    archivos.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return archivos[0]
+
+
+def _fmt_celda_excel(valor, num_fmt):
+    if valor is None or valor == "":
+        return ""
+    if isinstance(valor, str):
+        return valor
+    fmt = (num_fmt or "General").lower()
+    try:
+        if "%" in fmt:
+            return f"{float(valor) * 100:.1f}%"
+        if "$" in fmt or "taquilla" in fmt:
+            # enteros con $ si no pide decimales
+            if ".00" in fmt or "0.00" in fmt:
+                return f"${float(valor):,.2f}"
+            return f"${float(valor):,.0f}"
+        if isinstance(valor, float) and not valor.is_integer():
+            if abs(valor) < 10 and "." in fmt:
+                return f"{valor:,.2f}"
+            return f"{valor:,.1f}"
+        if isinstance(valor, (int, float)):
+            return f"{int(round(float(valor))):,}"
+    except Exception:
+        pass
+    return str(valor)
+
+
+def captura_xlsx_como_imagen(xlsx_path):
+    """
+    Lee el Excel de entrada y dibuja el rango usado como JPEG
+    (misma idea visual: header gris, bordes hair, Total gris).
+    """
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    from PIL import Image, ImageDraw, ImageFont
+
+    wb = load_workbook(xlsx_path, data_only=True)
+    ws = wb.active
+    min_r = min_c = max_r = max_c = None
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is not None and cell.value != "":
+                r, c = cell.row, cell.column
+                min_r = r if min_r is None else min(min_r, r)
+                max_r = r if max_r is None else max(max_r, r)
+                min_c = c if min_c is None else min(min_c, c)
+                max_c = c if max_c is None else max(max_c, c)
+    if min_r is None:
+        raise RuntimeError("El Excel está vacío.")
+
+    wb_s = load_workbook(xlsx_path, data_only=False)
+    ws_s = wb_s[ws.title]
+
+    escala = 2
+    fill_gris = "#F2F2F2"
+    borde = "#A6A6A6"
+    txt = "#404040"
+    txt_neg = "#C00000"
+
+    def font(pt, bold=False):
+        px = max(1, int(round(pt * 96 / 72 * escala)))
+        for ruta in (
+            ("calibrib.ttf" if bold else "calibri.ttf"),
+            ("/Windows/Fonts/calibrib.ttf" if bold else "/Windows/Fonts/calibri.ttf"),
+            ("arialbd.ttf" if bold else "arial.ttf"),
+            ("/Windows/Fonts/arialbd.ttf" if bold else "/Windows/Fonts/arial.ttf"),
+            (
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+                if bold
+                else "/System/Library/Fonts/Supplemental/Arial.ttf"
+            ),
+        ):
+            try:
+                return ImageFont.truetype(ruta, px)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    font_h = font(11, True)
+    font_n = font(11, False)
+    med = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+
+    def col_w(c):
+        letter = get_column_letter(c)
+        dim = ws.column_dimensions.get(letter)
+        wch = dim.width if dim and dim.width else 8.43
+        return max(int(round((float(wch) + 0.75) * 7 * escala)), int(24 * escala))
+
+    def row_h(r):
+        dim = ws.row_dimensions.get(r)
+        pt = dim.height if dim and dim.height else (32.0 if r == min_r else 15.75)
+        return max(int(round(float(pt) * 96 / 72 * escala)), int(16 * escala))
+
+    anchos = [col_w(c) for c in range(min_c, max_c + 1)]
+    altos = [row_h(r) for r in range(min_r, max_r + 1)]
+    w = sum(anchos) + 1
+    h = sum(altos) + 1
+    img = Image.new("RGB", (w, h), "white")
+    draw = ImageDraw.Draw(img)
+    pad = max(2, int(3 * escala))
+
+    def wrap(texto, fnt, max_w):
+        palabras = str(texto).split()
+        if not palabras:
+            return [""]
+        lineas, actual = [], palabras[0]
+        for p in palabras[1:]:
+            prueba = actual + " " + p
+            bb = med.textbbox((0, 0), prueba, font=fnt)
+            if (bb[2] - bb[0]) <= max_w - pad * 2:
+                actual = prueba
+            else:
+                lineas.append(actual)
+                actual = p
+        lineas.append(actual)
+        return lineas
+
+    y = 0
+    for ir, r in enumerate(range(min_r, max_r + 1)):
+        x = 0
+        ah = altos[ir]
+        es_header = r == min_r
+        # fila Total: texto "Total" en alguna celda
+        es_total = False
+        for c in range(min_c, max_c + 1):
+            v = ws.cell(r, c).value
+            if isinstance(v, str) and v.strip().lower() == "total":
+                es_total = True
+                break
+        for ic, c in enumerate(range(min_c, max_c + 1)):
+            aw = anchos[ic]
+            cell = ws.cell(r, c)
+            cell_s = ws_s.cell(r, c)
+            fill = fill_gris if (es_header or es_total) else "white"
+            draw.rectangle([x, y, x + aw - 1, y + ah - 1], fill=fill, outline=borde)
+            texto = _fmt_celda_excel(cell.value, cell_s.number_format)
+            if texto == "":
+                x += aw
+                continue
+            fnt = font_h if (es_header or es_total) else font_n
+            color = txt
+            # Dif SA negativos en rojo
+            if isinstance(cell.value, (int, float)) and cell.value < 0:
+                color = txt_neg
+            lineas = wrap(texto, fnt, aw) if es_header else [texto]
+            # medir bloque
+            lhs = []
+            for ln in lineas:
+                bb = med.textbbox((0, 0), ln, font=fnt)
+                lhs.append(bb[3] - bb[1])
+            th = sum(lhs) + max(0, len(lineas) - 1)
+            y0 = y + max(pad, (ah - th) // 2)
+            for ln, lh in zip(lineas, lhs):
+                bb = med.textbbox((0, 0), ln, font=fnt)
+                tw = bb[2] - bb[0]
+                if es_header:
+                    tx = x + (aw - tw) // 2 if ic > 1 else x + pad
+                elif ic <= 1:
+                    tx = x + pad
+                else:
+                    tx = x + aw - tw - pad  # números a la derecha
+                draw.text((tx, y0), ln, font=fnt, fill=color)
+                y0 += lh
+            x += aw
+        y += ah
+
+    out = os.path.join(
+        _dir_resultados(),
+        os.path.splitext(os.path.basename(xlsx_path))[0] + "_wa.jpg",
+    )
+    img.save(out, format="JPEG", quality=95, optimize=True)
+    print("Imagen desde Excel de entrada:")
+    print(" ", xlsx_path)
+    print(" ", out)
+    print(" ", img.size[0], "x", img.size[1])
+    return out
+
+
 # Layout vacío clonado de: Películas Semana 37.xlsx → "Top Fin de Semana" AY4:BK16
 # Colores/anchos/bordes leídos del Excel (hair + fill #F2F2F2).
 ENCABEZADOS_LAYOUT_FS = (
@@ -1022,7 +1226,7 @@ def main():
     ap.add_argument(
         "--top10",
         action="store_true",
-        help="En esta rama: manda el Top 10 antier (flujo estable). Por defecto: layout vacío.",
+        help="Manda el Top 10 antier (SQL). Por defecto: Excel en entrada/ como imagen.",
     )
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
     args = ap.parse_args()
@@ -1041,10 +1245,11 @@ def main():
                 print(" ", xlsx)
                 imagen = captura_excel(xlsx)
             else:
-                # Rama prueba/layout-fs37: solo layout (sin query)
-                print("Modo layout vacío (rama de pruebas, sin SQL).")
-                imagen = captura_layout_vacio()
-                texto = "(layout vacío — solo encabezados)"
+                # Rama prueba: Excel en whatsapp/entrada/ → imagen → WhatsApp
+                print("Modo entrada Excel → imagen (sin generar tabla).")
+                xlsx = excel_en_entrada()
+                imagen = captura_xlsx_como_imagen(xlsx)
+                texto = f"(imagen de {os.path.basename(xlsx)})"
         except Exception as e:
             print("No salió la consulta o la captura.")
             print(" ", str(e))
@@ -1054,7 +1259,7 @@ def main():
             print(texto)
             print()
         else:
-            print("Se mandará solo la imagen del layout.")
+            print("Se mandará la imagen del Excel de entrada/.")
             print()
 
     try:
