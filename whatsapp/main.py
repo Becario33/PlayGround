@@ -145,7 +145,7 @@ _ANCHOS_EXCEL_FS = (
 )
 _ALTO_HEADER_PT = 32.55
 _ALTO_FILA_PT = 15.75
-_FILL_GRIS = "#F2F2F2"  # header / Película / Total (rgb FFF2F2F2 del xlsx)
+_FILL_GRIS = "#F2F2F2"  # solo header y fila Total (rgb FFF2F2F2 del xlsx)
 _BORDE_HAIR = "#A6A6A6"  # theme lt1 tint≈0.35
 _TXT_HEADER = "#595959"
 _TXT_CUERPO = "#404040"
@@ -255,10 +255,6 @@ def captura_layout_vacio():
         x = 0
         for i, aw in enumerate(anchos):
             if es_total:
-                fill = _FILL_GRIS
-            elif es_sep:
-                fill = "white"
-            elif i == 1:
                 fill = _FILL_GRIS
             else:
                 fill = "white"
