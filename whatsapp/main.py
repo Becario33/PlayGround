@@ -261,15 +261,14 @@ def captura_layout_vacio():
             draw.rectangle([x, y1, x + aw - 1, y2 - 1], fill=fill)
             if es_total and i == 1:
                 draw.text((x + pad, y1 + pad), "Total", font=font_t, fill=_TXT_HEADER)
-            if not es_sep and not es_total:
+            # Rejilla hair en datos (5–14) y en Total (16); la fila 15 queda en blanco
+            if not es_sep:
                 draw.rectangle(
                     [x, y1, x + aw - 1, y2 - 1],
                     outline=_BORDE_HAIR,
                     width=1,
                 )
             x += aw
-        if es_total:
-            draw.line([(0, y2 - 1), (w - 1, y2 - 1)], fill=_BORDE_HAIR, width=1)
 
     ruta = os.path.join(_dir_resultados(), "layout_fs_vacio.jpg")
     img.save(ruta, format="JPEG", quality=95, optimize=True)
