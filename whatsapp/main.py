@@ -1656,9 +1656,9 @@ def main():
         ok = esperar_sesion(page)
         if ok and not args.solo_abrir:
             try:
-            if args.para:
+                if args.para:
                     ok = enviar(page, args.para, texto)
-            else:
+                else:
                     ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
             except Exception as e:
                 print("Falló el envío (Chrome sigue abierto).")
