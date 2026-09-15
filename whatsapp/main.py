@@ -295,20 +295,31 @@ def _captura_pillow(xlsx_path, jpg_path):
     for c in range(ncols - 1):
         x += anchos[c]
         draw.line([(x, altos[0]), (x, h - 1)], fill="#C8C8C8")
-    # Foto definida (no sticker): mínimo ~1280×720 escalando la tabla
-    min_w, min_h = 1280, 720
-    factor = max(min_w / float(tabla.width), min_h / float(tabla.height), 1.0)
-    if factor > 1.0:
-        nw = max(1, int(round(tabla.width * factor)))
-        nh = max(1, int(round(tabla.height * factor)))
-        try:
-            resample = Image.Resampling.LANCZOS
-        except AttributeError:
-            resample = Image.LANCZOS
-        tabla = tabla.resize((nw, nh), resample)
+    # Lienzo fijo 1280×720 (foto). Escalar la tabla a banner ultra-ancho
+    # hace que WhatsApp a veces la mande como sticker.
+    canvas_w, canvas_h = 1280, 720
+    margen = 48
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    max_w = canvas_w - margen * 2
+    max_h = canvas_h - margen * 2
+    fill = min(max_w / float(tabla.width), max_h / float(tabla.height))
+    if abs(fill - 1.0) > 0.001:
+        tabla = tabla.resize(
+            (max(1, int(round(tabla.width * fill))),
+             max(1, int(round(tabla.height * fill)))),
+            resample,
+        )
     tabla = tabla.convert("RGB")
-    tabla.save(jpg_path, format="JPEG", quality=95)
-    print("  JPEG foto:", tabla.size[0], "x", tabla.size[1])
+    canvas = Image.new("RGB", (canvas_w, canvas_h), "#F2F2F2")
+    canvas.paste(
+        tabla,
+        ((canvas_w - tabla.width) // 2, (canvas_h - tabla.height) // 2),
+    )
+    canvas.save(jpg_path, format="JPEG", quality=95, optimize=True)
+    print("  JPEG foto:", canvas.size[0], "x", canvas.size[1])
     return jpg_path
 
 
@@ -519,11 +530,10 @@ def _js_clic_enviar_media(page):
 
 def enviar_imagen(page, ruta, pie=""):
     """
-    Hallazgo real (Chrome + WhatsApp Web actual):
-      - El menú tiene Photos & videos / New sticker SIN input adentro.
-      - El input de foto está en el footer: accept="image/*"
-      - set_input_files a ese input abre el preview (Send 1 selected).
-      - No hace falta (ni conviene) depender del clic a Photos & videos.
+    Foto (no sticker):
+      1) Attach → clic en Photos & videos (nunca New sticker).
+      2) Si el file chooser no aparece, set_input_files en accept=image/* del footer.
+      3) Abortar si el UI es el de sticker.
     """
     if not os.path.isfile(ruta):
         print("No está el JPEG de la captura.")
@@ -533,11 +543,23 @@ def enviar_imagen(page, ruta, pie=""):
     def _hay_preview():
         return page.locator('div[role="button"][aria-label="Send 1 selected"]').count() > 0
 
+    def _es_ui_sticker():
+        return page.evaluate(
+            """() => {
+                const labels = [...document.querySelectorAll('[aria-label]')]
+                    .map(el => (el.getAttribute('aria-label') || '').toLowerCase());
+                const texto = (document.body && document.body.innerText || '').toLowerCase();
+                if (labels.some(a => a.includes('new sticker') || a === 'sticker')) return true;
+                if (texto.includes('drag to rearrange') && texto.includes('sticker')) return true;
+                if (document.querySelector('canvas') && texto.includes('add sticker')) return true;
+                return false;
+            }"""
+        )
+
     def _es_sticker_accept(accept):
         a = (accept or "").lower()
         if "video" in a or "image/*" in a or "jpeg" in a or "jpg" in a:
             return False
-        # New sticker típico: solo png/webp
         return "webp" in a and "png" in a
 
     def _set_foto_input():
@@ -547,7 +569,7 @@ def enviar_imagen(page, ruta, pie=""):
             }))"""
         )
         print("  inputs:", infos)
-        # Preferir image/* (foto real en WA actual), luego video, nunca sticker
+
         def score(info):
             a = (info.get("accept") or "").lower()
             if _es_sticker_accept(a):
@@ -598,19 +620,49 @@ def enviar_imagen(page, ruta, pie=""):
             page.wait_for_timeout(200)
         return True
 
-    print("Adjunto: input footer image/* (foto)...")
-    if not _set_foto_input():
-        print("Abro Attach (por si monta el input)...")
-        _abrir_clip()
-        page.wait_for_timeout(800)
-        labels = page.evaluate(
-            """() => [...document.querySelectorAll('button[role="menuitem"]')]
-                .map(el => el.getAttribute('aria-label') || '')"""
+    def _adjuntar_por_photos():
+        """Clic en Photos & videos + file chooser = ruta explícita de foto."""
+        if not _abrir_clip():
+            return False
+        page.wait_for_timeout(400)
+        photos = page.locator(
+            'button[role="menuitem"][aria-label*="Photos"], '
+            'button[role="menuitem"][aria-label*="Fotos"]'
         )
-        print("  menuitems:", labels)
+        if not photos.count():
+            print("  no vi menuitem Photos & videos")
+            return False
+        try:
+            with page.expect_file_chooser(timeout=5000) as fc_info:
+                photos.first.click(timeout=8000)
+            chooser = fc_info.value
+            chooser.set_files(ruta_abs)
+            print("  Photos & videos + file_chooser OK")
+        except Exception as e:
+            print("  file_chooser no salió:", str(e).split("\n")[0])
+            # A veces el clic no abre chooser; el input ya quedó listo
+            if not _set_foto_input():
+                return False
+        for _ in range(28):
+            page.wait_for_timeout(250)
+            if _hay_preview():
+                print("  Preview OK tras Photos.")
+                return True
+        return False
+
+    print("Adjunto: Photos & videos (foto, no sticker)...")
+    ok = _adjuntar_por_photos()
+    if not ok:
+        print("Fallback: input footer image/*...")
         if not _set_foto_input():
             print("No pude adjuntar la foto.")
             return False
+
+    if _es_ui_sticker():
+        print("UI de sticker detectada; cancelo (no envío sticker).")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(400)
+        return False
 
     media = page.locator('div[role="button"][aria-label="Send 1 selected"]')
     try:

@@ -31,6 +31,7 @@ cinepolis/             Nota Cinépolis
 
 ## Versiones
 
+- **v1.4.15** — Foto 1280×720 + Attach→Photos (evita sticker)
 - **v1.4.14** — Foto: input footer `accept=image/*` (verificado en Chrome real)
 - **v1.4.13** — Adjunta por input oculto (video); clic Photos ya no es la vía principal
 - **v1.4.12** — Attach expanded + clic JS fuerte a Photos & videos
