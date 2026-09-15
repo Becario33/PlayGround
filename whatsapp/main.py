@@ -21,12 +21,11 @@ SELECT TOP 10
 FROM [Programacion].[dbo].[ComscoreMPAMexico]
 WHERE FechaComscore = DATEADD(day, -1, CAST(GETDATE() AS date))
 GROUP BY NombrePelicula
-ORDER BY Asistencia DESC
+ORDER BY Taquilla DESC
 """.strip()
 DRIVERS_ODBC = (
     "ODBC Driver 17 for SQL Server",
     "ODBC Driver 18 for SQL Server",
-    "SQL Server",
 )
 
 
@@ -187,7 +186,7 @@ def llenar_plantilla_top10(cols, filas):
     from openpyxl import load_workbook
 
     dia = _etiqueta_ayer()
-    destino = os.path.join(_dir_resultados(), f"top10_asistencia_{dia}.xlsx")
+    destino = os.path.join(_dir_resultados(), f"top10_taquilla_{dia}.xlsx")
     shutil.copy2(plantilla_oficial(), destino)
 
     por_nombre = {str(c).strip().lower(): i for i, c in enumerate(cols)}
@@ -1077,9 +1076,9 @@ def _perfil_en_uso(perfil):
 
 def _lanzar(pw, perfil):
     comunes = dict(
-        headless=False,
-        locale="es-MX",
-        no_viewport=True,
+            headless=False,
+            locale="es-MX",
+            no_viewport=True,
         args=["--disable-dev-shm-usage"],
     )
     extras = dict(chromium_sandbox=True, ignore_default_args=["--no-sandbox"])
@@ -1598,7 +1597,7 @@ def main():
     ap.add_argument(
         "--top10",
         action="store_true",
-        help="Manda el Top 10 de ayer por asistencia (SQL → Plantilla en resultados/).",
+        help="Manda el Top 10 de ayer por taquilla (SQL → Plantilla en resultados/).",
     )
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
     args = ap.parse_args()
@@ -1611,7 +1610,7 @@ def main():
     elif texto is None and not args.solo_abrir:
         try:
             # Default y --top10: SQL Top10 ayer → copia Plantilla en resultados/ → captura
-            print("Top 10 ayer por asistencia → Plantilla (copia en resultados/).")
+            print("Top 10 ayer por taquilla → Plantilla (copia en resultados/).")
             texto, cols, filas = consulta_asistencia()
             xlsx = llenar_plantilla_top10(cols, filas)
             imagen = captura_xlsx_como_imagen(xlsx)
@@ -1657,9 +1656,9 @@ def main():
         ok = esperar_sesion(page)
         if ok and not args.solo_abrir:
             try:
-                if args.para:
+            if args.para:
                     ok = enviar(page, args.para, texto)
-                else:
+            else:
                     ok = enviar_grupo(page, args.grupo, texto, imagen=imagen)
             except Exception as e:
                 print("Falló el envío (Chrome sigue abierto).")

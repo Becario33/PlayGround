@@ -1,8 +1,8 @@
 Plantilla oficial: Plantilla.xlsx (no la edites a mano con datos del día).
 
 Al correr python main.py:
-1) se copia a resultados/top10_asistencia_YYYY-MM-DD.xlsx
-2) se escriben solo valores (Top 10 ayer por asistencia: B/C/D + Total)
+1) se copia a resultados/top10_taquilla_YYYY-MM-DD.xlsx
+2) se escriben solo valores (Top 10 ayer por taquilla: B/C/D + Total)
 3) Excel COM captura esa copia (CF y formato se respetan)
 4) la foto se manda al grupo Data Analytics
 
