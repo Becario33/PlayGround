@@ -122,18 +122,18 @@ def _etiqueta_antier():
 
 
 
-DIR_ENTRADA = "entrada"
+DIR_LAYOUT = "layout"
 
 
-def _dir_entrada():
-    ruta = os.path.join(_dir_script(), DIR_ENTRADA)
+def _dir_layout():
+    ruta = os.path.join(_dir_script(), DIR_LAYOUT)
     os.makedirs(ruta, exist_ok=True)
     return ruta
 
 
-def excel_en_entrada():
-    """Devuelve el .xlsx más reciente en whatsapp/entrada/."""
-    carpeta = _dir_entrada()
+def excel_en_layout():
+    """Devuelve el .xlsx más reciente en whatsapp/layout/ (plantilla)."""
+    carpeta = _dir_layout()
     archivos = [
         os.path.join(carpeta, n)
         for n in os.listdir(carpeta)
@@ -143,7 +143,7 @@ def excel_en_entrada():
         raise RuntimeError(
             "No hay Excel en:\n  "
             + carpeta
-            + "\nCopia ahí el .xlsx (ej. prueba.xlsx) y vuelve a correr."
+            + "\nPon ahí la plantilla .xlsx y vuelve a correr."
         )
     archivos.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return archivos[0]
@@ -158,13 +158,12 @@ def _fmt_celda_excel(valor, num_fmt):
     try:
         if "%" in fmt:
             return f"{float(valor) * 100:.1f}%"
-        if "$" in fmt or "taquilla" in fmt:
-            # enteros con $ si no pide decimales
+        if "$" in fmt:
             if ".00" in fmt or "0.00" in fmt:
                 return f"${float(valor):,.2f}"
             return f"${float(valor):,.0f}"
         if isinstance(valor, float) and not valor.is_integer():
-            if abs(valor) < 10 and "." in fmt:
+            if ".00" in fmt or "0.00" in fmt:
                 return f"{valor:,.2f}"
             return f"{valor:,.1f}"
         if isinstance(valor, (int, float)):
@@ -174,19 +173,166 @@ def _fmt_celda_excel(valor, num_fmt):
     return str(valor)
 
 
-def captura_xlsx_como_imagen(xlsx_path):
+def _excel_tint_rgb(rgb, tint):
+    """Aproxima el tint de Excel sobre un RGB 0–255."""
+    if tint is None:
+        return rgb
+    r, g, b = rgb
+
+    def one(c):
+        c = c / 255.0
+        if tint < 0:
+            # aclarar (hacia blanco): típico Dark1 Lighter 95% ~ tint -0.05 en UI
+            # En práctica header gris ≈ F2F2F2
+            if abs(tint) < 0.08 and rgb == (0, 0, 0):
+                return 0xF2
+            c = c * (1.0 + tint) + (1.0 - (1.0 + tint)) * 1.0 * abs(tint) / max(abs(tint), 1e-9)
+            # fallback lighten
+            c = min(1.0, c + (1.0 - c) * abs(tint) * 18)
+        else:
+            c = c * (1.0 - tint)
+        return int(round(max(0, min(1, c)) * 255))
+
+    if tint < 0 and rgb == (0, 0, 0) and abs(tint) < 0.08:
+        return (0xF2, 0xF2, 0xF2)
+    return (one(r), one(g), one(b))
+
+
+def _color_openpyxl(color):
+    if color is None:
+        return None
+    try:
+        if color.type == "rgb" and color.rgb and str(color.rgb) not in ("00000000", "None"):
+            rgb = str(color.rgb)
+            if len(rgb) == 8:
+                rgb = rgb[2:]
+            if len(rgb) == 6 and rgb.upper() != "000000":
+                return "#" + rgb.upper()
+            if len(rgb) == 6 and rgb.upper() == "000000":
+                return "#000000"
+        if color.type == "theme":
+            theme = color.theme
+            tint = float(color.tint or 0)
+            base = {
+                0: (0, 0, 0),
+                1: (255, 255, 255),
+                2: (31, 73, 125),
+                3: (238, 236, 225),
+                4: (79, 129, 189),
+                5: (192, 80, 77),
+                6: (155, 187, 89),
+                7: (128, 100, 162),
+                8: (75, 172, 198),
+                9: (247, 150, 70),
+            }.get(theme, (255, 255, 255))
+            r, g, b = _excel_tint_rgb(base, tint)
+            return f"#{r:02X}{g:02X}{b:02X}"
+    except Exception:
+        return None
+    return None
+
+
+def _fill_celda(cell):
+    fill = cell.fill
+    if not fill or fill.patternType not in ("solid",):
+        return "#FFFFFF"
+    hx = _color_openpyxl(fill.fgColor)
+    if not hx or hx.upper() in ("#00000000",):
+        return "#FFFFFF"
+    # openpyxl a veces marca fill “vacío” como negro transparente
+    if hx.upper() == "#000000" and fill.fgColor and getattr(fill.fgColor, "type", None) == "rgb":
+        rgb = str(fill.fgColor.rgb or "")
+        if rgb in ("00000000", "0"):
+            return "#FFFFFF"
+    return hx
+
+
+def _fuente_celda(cell):
+    hx = _color_openpyxl(cell.font.color) if cell.font else None
+    return hx or "#404040"
+
+
+def _borde_color(cell):
+    for side in (cell.border.left, cell.border.right, cell.border.top, cell.border.bottom):
+        if side and side.style:
+            hx = _color_openpyxl(side.color) if side.color else None
+            return hx or "#A6A6A6"
+    return "#A6A6A6"
+
+
+def _captura_excel_com(xlsx_path, jpg_path):
     """
-    Lee el Excel de entrada y dibuja el rango usado como JPEG
-    (misma idea visual: header gris, bordes hair, Total gris).
+    Windows: copia visual del rango usado con Excel (tal cual lo ves).
     """
+    if sys.platform != "win32":
+        return False
+    try:
+        import pythoncom
+        from win32com.client import Dispatch
+        from PIL import ImageGrab
+    except Exception as e:
+        print("  Excel COM no disponible:", str(e).split("\n")[0])
+        return False
+
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+    try:
+        excel = Dispatch("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
+        ruta = os.path.abspath(xlsx_path)
+        wb = excel.Workbooks.Open(ruta, ReadOnly=True)
+        ws = wb.ActiveSheet
+        rng = ws.UsedRange
+        # 1=xlScreen, 2=xlBitmap
+        rng.CopyPicture(Appearance=1, Format=2)
+        img = ImageGrab.grabclipboard()
+        if img is None:
+            rng.CopyPicture(Appearance=1, Format=-4147)  # xlPicture
+            img = ImageGrab.grabclipboard()
+        if img is None:
+            print("  Excel COM: portapapeles vacío tras CopyPicture")
+            return False
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        img.save(jpg_path, format="JPEG", quality=95, optimize=True)
+        print("  Captura Excel COM (tal cual):", img.size[0], "x", img.size[1])
+        return True
+    except Exception as e:
+        print("  Excel COM falló:", str(e).split("\n")[0])
+        return False
+    finally:
+        try:
+            if wb is not None:
+                wb.Close(False)
+        except Exception:
+            pass
+        try:
+            if excel is not None:
+                excel.Quit()
+        except Exception:
+            pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
+
+def _captura_xlsx_pillow(xlsx_path, jpg_path):
+    """Fallback: pinta desde openpyxl respetando anchos, altos y fills."""
     from openpyxl import load_workbook
     from openpyxl.utils import get_column_letter
     from PIL import Image, ImageDraw, ImageFont
 
-    wb = load_workbook(xlsx_path, data_only=True)
-    ws = wb.active
+    wb_vals = load_workbook(xlsx_path, data_only=True)
+    wb = load_workbook(xlsx_path, data_only=False)
+    ws_v = wb_vals.active
+    ws = wb[ws_v.title]
+
     min_r = min_c = max_r = max_c = None
-    for row in ws.iter_rows():
+    for row in ws_v.iter_rows():
         for cell in row:
             if cell.value is not None and cell.value != "":
                 r, c = cell.row, cell.column
@@ -197,17 +343,35 @@ def captura_xlsx_como_imagen(xlsx_path):
     if min_r is None:
         raise RuntimeError("El Excel está vacío.")
 
-    wb_s = load_workbook(xlsx_path, data_only=False)
-    ws_s = wb_s[ws.title]
-
     escala = 2
-    fill_gris = "#F2F2F2"
-    borde = "#A6A6A6"
-    txt = "#404040"
-    txt_neg = "#C00000"
+    default_row = float(ws.sheet_format.defaultRowHeight or 15)
+    default_col = float(ws.sheet_format.defaultColWidth or 8.43)
+
+    def col_w(c):
+        letter = get_column_letter(c)
+        dim = ws.column_dimensions.get(letter)
+        wch = dim.width if dim and dim.width is not None else default_col
+        return max(int(round((float(wch) + 0.75) * 7 * escala)), int(18 * escala))
+
+    def row_h(r):
+        dim = ws.row_dimensions.get(r)
+        if dim is not None and dim.height is not None:
+            pt = float(dim.height)
+        else:
+            pt = default_row
+        return max(int(round(pt * 96 / 72 * escala)), int(12 * escala))
+
+    anchos = [col_w(c) for c in range(min_c, max_c + 1)]
+    altos = [row_h(r) for r in range(min_r, max_r + 1)]
+    w = sum(anchos) + 1
+    h = sum(altos) + 1
+    img = Image.new("RGB", (w, h), "white")
+    draw = ImageDraw.Draw(img)
+    pad = max(2, int(2 * escala))
+    med = ImageDraw.Draw(Image.new("RGB", (8, 8)))
 
     def font(pt, bold=False):
-        px = max(1, int(round(pt * 96 / 72 * escala)))
+        px = max(1, int(round(float(pt) * 96 / 72 * escala)))
         for ruta in (
             ("calibrib.ttf" if bold else "calibri.ttf"),
             ("/Windows/Fonts/calibrib.ttf" if bold else "/Windows/Fonts/calibri.ttf"),
@@ -224,29 +388,6 @@ def captura_xlsx_como_imagen(xlsx_path):
             except Exception:
                 continue
         return ImageFont.load_default()
-
-    font_h = font(11, True)
-    font_n = font(11, False)
-    med = ImageDraw.Draw(Image.new("RGB", (8, 8)))
-
-    def col_w(c):
-        letter = get_column_letter(c)
-        dim = ws.column_dimensions.get(letter)
-        wch = dim.width if dim and dim.width else 8.43
-        return max(int(round((float(wch) + 0.75) * 7 * escala)), int(24 * escala))
-
-    def row_h(r):
-        dim = ws.row_dimensions.get(r)
-        pt = dim.height if dim and dim.height else (32.0 if r == min_r else 15.75)
-        return max(int(round(float(pt) * 96 / 72 * escala)), int(16 * escala))
-
-    anchos = [col_w(c) for c in range(min_c, max_c + 1)]
-    altos = [row_h(r) for r in range(min_r, max_r + 1)]
-    w = sum(anchos) + 1
-    h = sum(altos) + 1
-    img = Image.new("RGB", (w, h), "white")
-    draw = ImageDraw.Draw(img)
-    pad = max(2, int(3 * escala))
 
     def wrap(texto, fnt, max_w):
         palabras = str(texto).split()
@@ -268,61 +409,66 @@ def captura_xlsx_como_imagen(xlsx_path):
     for ir, r in enumerate(range(min_r, max_r + 1)):
         x = 0
         ah = altos[ir]
-        es_header = r == min_r
-        # fila Total: texto "Total" en alguna celda
-        es_total = False
-        for c in range(min_c, max_c + 1):
-            v = ws.cell(r, c).value
-            if isinstance(v, str) and v.strip().lower() == "total":
-                es_total = True
-                break
         for ic, c in enumerate(range(min_c, max_c + 1)):
             aw = anchos[ic]
             cell = ws.cell(r, c)
-            cell_s = ws_s.cell(r, c)
-            fill = fill_gris if (es_header or es_total) else "white"
+            cell_v = ws_v.cell(r, c)
+            fill = _fill_celda(cell)
+            borde = _borde_color(cell)
             draw.rectangle([x, y, x + aw - 1, y + ah - 1], fill=fill, outline=borde)
-            texto = _fmt_celda_excel(cell.value, cell_s.number_format)
-            if texto == "":
-                x += aw
-                continue
-            fnt = font_h if (es_header or es_total) else font_n
-            color = txt
-            # Dif SA negativos en rojo
-            if isinstance(cell.value, (int, float)) and cell.value < 0:
-                color = txt_neg
-            lineas = wrap(texto, fnt, aw) if es_header else [texto]
-            # medir bloque
-            lhs = []
-            for ln in lineas:
-                bb = med.textbbox((0, 0), ln, font=fnt)
-                lhs.append(bb[3] - bb[1])
-            th = sum(lhs) + max(0, len(lineas) - 1)
-            y0 = y + max(pad, (ah - th) // 2)
-            for ln, lh in zip(lineas, lhs):
-                bb = med.textbbox((0, 0), ln, font=fnt)
-                tw = bb[2] - bb[0]
-                if es_header:
-                    tx = x + (aw - tw) // 2 if ic > 1 else x + pad
-                elif ic <= 1:
-                    tx = x + pad
-                else:
-                    tx = x + aw - tw - pad  # números a la derecha
-                draw.text((tx, y0), ln, font=fnt, fill=color)
-                y0 += lh
+            texto = _fmt_celda_excel(cell_v.value, cell.number_format)
+            if texto != "":
+                size = cell.font.size or 11
+                fnt = font(size, bool(cell.font.bold))
+                color = _fuente_celda(cell)
+                if isinstance(cell_v.value, (int, float)) and cell_v.value < 0:
+                    # respeta rojo de fuente si ya viene; si no, marca negativo
+                    if color.upper() in ("#404040", "#000000", "#595959"):
+                        color = "#C00000"
+                wrap_txt = bool(cell.alignment and cell.alignment.wrap_text) or (r == min_r)
+                lineas = wrap(texto, fnt, aw) if wrap_txt else [texto]
+                lhs = [med.textbbox((0, 0), ln, font=fnt)[3] - med.textbbox((0, 0), ln, font=fnt)[1] for ln in lineas]
+                th = sum(lhs) + max(0, len(lineas) - 1)
+                y0 = y + max(pad, (ah - th) // 2)
+                align = (cell.alignment.horizontal if cell.alignment else None) or (
+                    "left" if ic <= 1 else "right"
+                )
+                for ln, lh in zip(lineas, lhs):
+                    tw = med.textbbox((0, 0), ln, font=fnt)[2] - med.textbbox((0, 0), ln, font=fnt)[0]
+                    if align == "center":
+                        tx = x + (aw - tw) // 2
+                    elif align == "right":
+                        tx = x + aw - tw - pad
+                    else:
+                        tx = x + pad
+                    draw.text((tx, y0), ln, font=fnt, fill=color)
+                    y0 += lh
             x += aw
         y += ah
 
+    img.save(jpg_path, format="JPEG", quality=95, optimize=True)
+    print("  Captura Pillow (fallback):", img.size[0], "x", img.size[1])
+    return True
+
+
+def captura_xlsx_como_imagen(xlsx_path):
+    """
+    Plantilla en layout/ → JPEG para WhatsApp.
+    En Windows intenta Excel COM (copia visual exacta); si no, Pillow con estilos.
+    """
     out = os.path.join(
         _dir_resultados(),
         os.path.splitext(os.path.basename(xlsx_path))[0] + "_wa.jpg",
     )
-    img.save(out, format="JPEG", quality=95, optimize=True)
-    print("Imagen desde Excel de entrada:")
+    print("Plantilla layout → imagen:")
     print(" ", xlsx_path)
+    if _captura_excel_com(xlsx_path, out):
+        print(" ", out)
+        return out
+    _captura_xlsx_pillow(xlsx_path, out)
     print(" ", out)
-    print(" ", img.size[0], "x", img.size[1])
     return out
+
 
 
 # Layout vacío clonado de: Películas Semana 37.xlsx → "Top Fin de Semana" AY4:BK16
@@ -1226,7 +1372,7 @@ def main():
     ap.add_argument(
         "--top10",
         action="store_true",
-        help="Manda el Top 10 antier (SQL). Por defecto: Excel en entrada/ como imagen.",
+        help="Manda el Top 10 antier (SQL). Por defecto: Excel en layout/ como imagen.",
     )
     ap.add_argument("--solo-abrir", action="store_true", help="No enviar, solo abrir sesión")
     args = ap.parse_args()
@@ -1245,9 +1391,9 @@ def main():
                 print(" ", xlsx)
                 imagen = captura_excel(xlsx)
             else:
-                # Rama prueba: Excel en whatsapp/entrada/ → imagen → WhatsApp
-                print("Modo entrada Excel → imagen (sin generar tabla).")
-                xlsx = excel_en_entrada()
+                # Rama prueba: Excel en whatsapp/layout/ → imagen → WhatsApp
+                print("Modo layout/ plantilla Excel → imagen.")
+                xlsx = excel_en_layout()
                 imagen = captura_xlsx_como_imagen(xlsx)
                 texto = f"(imagen de {os.path.basename(xlsx)})"
         except Exception as e:
@@ -1259,7 +1405,7 @@ def main():
             print(texto)
             print()
         else:
-            print("Se mandará la imagen del Excel de entrada/.")
+            print("Se mandará la imagen del Excel de layout/.")
             print()
 
     try:

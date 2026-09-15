@@ -1,0 +1,9 @@
+Carpeta LAYOUT (plantilla).
+
+Pon aquí el .xlsx con el diseño/formato que quieras mandar.
+Al correr: python main.py
+→ se toma el .xlsx más reciente de esta carpeta
+→ se captura TAL CUAL (en Windows con Excel) a imagen
+→ se manda al grupo WhatsApp.
+
+No mandamos el archivo; mandamos la foto del Excel.
